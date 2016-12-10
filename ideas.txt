@@ -1,0 +1,84 @@
+Ghosts outside rooms
+Turn based, wall-knocking down
+Stats:
+  HP
+  AP
+  Population
+  DPS
+Actions:
+  All Actions -> -1 AP, -DPS/Population HP (lose DPS every Population Actions)
+  Explore -> +X AP, +/-Y DPS, Rarely +1 Population
+    Risky explores (near edge) = more DPS gained, closer to Popuation
+    Safe explores = less DPS gained (or DPS decreased), but no closer to Population
+  Fortify -> -1 DPS
+  Heal -> +X HP
+Goals:
+  Population = N (find all), then escape?
+  (Self-driven) explore all, keep on exploring
+    Needs to terminate, e.g. DPS increases faster than fortification can help
+Fails: No interesting choices, strategy is either turtling or rapid exploration, impossible to balance middle
+Want decision to be: Do I make a risky, deeper explore, or a safer local explore
+  Maybe needs to be more DotE - actually places your guys to block flow of evil
+
+DotE TBS:
+  Place defenders to block flow of evil - take damage, but evil does not get through
+  Place supporters to build:
+    Healing (just heal one turn, or build something that heals if someone is assigned there?)
+    Blockade (takes one turn to build, so should block for one turn of attackers, but maybe any amount)
+      - why not always build blockades instead of defending?
+    Turret - like fortify, blocks one incoming attacker
+  Ends up being just a tower defense
+
+
+Something actiony?
+  Open door, all red walls generate enemies, quickly kill them all
+  Or, slightly tower defense-y - simulation of defenders running
+
+
+Like the idea of the unexplored territory as a resource:
+  Neighboring nodes:
+    Generate 1 of three attributes
+    Goal is to keep attributes even?
+  Actions:
+    All actions -> trigger neighboring nodes
+    Kick down door -> change in neighboring nodes,
+
+
+
+
+
+
+Slightly more RTS
+  every tick, green squares generate HP, red neighbors decrease HP
+    - can balance, ramp up things more analogly here?
+  have N assigned workers, can only build green square next to other green square, or knock down walls next to green squares
+  Stats:
+    HP
+    Population
+    +HP/s (monotonically increasing)
+    -DP/s (randomly fluctuating based on rooms explored)
+  Still: Need incentive to head towards new worker
+    Knock down room, is very large, cannot fortify in time
+      Then just lose? Change track to grab other population first? But that would open more space, would not be clearly good
+    Maybe worker nearest evil takes damage, if you dig in the other direction, instead the evil targets your green squares and eats those away
+      Now topology matters more - maybe you end up with a choke point which a worker cannot possibly build on because too much damage is coming from there, so you need to dig in from another side
+      - how do you not end up with that the turn in which you knock down a wall into a new, big room? You do, but you can knock down a neighboring wall to fight back, but now you'll never fortify enough...
+      Maybe you just have to abandon rooms until you've got enough workers to fight back? But, evil DPS will keep on increasing? Not if you fortify in the other direction quick enough - but need to leave a worker there, taking some damage, so that tiles aren't lost quick enough
+
+  Green tile: 16 HP, generates +1 HP orb per tick
+  Red neighbors: generages -1 HP orbs
+  Orbs seek each other if nearby to cancel, otherwise deal damage to nearest tile, or builder if builder is on tile that was reduced to 0 HP
+  Builder builds at N HP/s, effectively generating N more HP/s if the square they are building is under attack
+    - means a new room of size N+1 cannot be built into - have to widen the doorway by opening another room
+      even if we have unlimited fortification behind us, one builder cannot build fast enough, though the builder will not die
+      - most rooms should be N+1 or larger, but usually have multiple doorways
+  Do orbs heal damaged tiles too? Maybe orbs don't cancel orbs, they just heal the tiles?  Or tiles hold a buffer of 1-2 orbs to cancel incoming evil - or HP IS orbs - green squares are a collection of 9 (16?) orbs
+
+  Start in 3x3 room with 2 workers - will be taking 12 damage, generating 9, workers can repair the difference
+
+
+Plan:
+  X Draw room
+  X Click to open new room
+  X Add workers
+  Add HP, orbs, ticking
