@@ -88,12 +88,16 @@ TODO:
   X find nearest is not looking at dest_x
   X auto-work if on a damaged square (no task for repair!)
   X generate an exit after all rescued
-  Move dig/rescue/all task status to board instead of worker? Then canceled dig tasks are resumable.
-  Select worker to assign task to specific worker
-  Put workers on the wall when working on digging
-  Rescuable workers periodically say "help me", "i'm scared", etc
-  Game over screens
-  Edge of the world limits
+  X Move dig/rescue/all task status to board instead of worker? Then canceled dig tasks are resumable.
+  X Only flag as busy if there is more than 2 HP to recover, but unflag as normal
+  X Want to be able to click 3 times to send 3 existing repairing workers to 3 new spots (while moving, treat as lowest priority for assignment) - seems like this works
+  X Select worker to assign task to specific worker
+  X Animated room opening
+  X Highlight just edge for digging
+  X Put workers on the wall when working on digging
+  X Edge of the world limits
+  X Rescuable workers periodically say "help me", "i'm scared", etc
+  X Game over screens
   Some kind of intro/help text/tutorial
     Some mini-rooms at once
       four evil and a worker and green getting hurt

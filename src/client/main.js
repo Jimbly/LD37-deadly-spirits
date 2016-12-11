@@ -10,33 +10,40 @@
 
 TurbulenzEngine.onload = function onloadFn()
 {
-  const TEST = false;
+  const TEST = true;
 
   const DIG_TIME = TEST ? 1000 : 8000;
   const REPAIR_TIME = 8000/16;
-  const BOARD_MAX_HP = 16;
-  const WORKER_MAX_HP = 20;
-  const SPEED_WORKER = 4/1000;
+  const BOARD_MAX_HP = 12;
+  const WORKER_MAX_HP = TEST ? 200 : 20;
+  const SPEED_WORKER = TEST ? 4/1000 : 4/1000;
   const SPEED_ORB_EVIL = 1/1000;
   const SPEED_ORB_GOOD = 1/1000;
   const TARGET_WORKERS = TEST ? 0 : 4;
   const TARGET_WORKER_RANGE = TEST ? [3,6] : [8, 12];
   const EVIL_RATE = 3000;
   const GOOD_RATE = 3000;
-  const EXIT_DIST = TEST ? 2 : 6;
+  const EXIT_DIST = TEST ? 2 : 8;
+  const ROOM_OPEN_DELAY = 150;
+  const RED_FADE_IN_TIME = 1500;
+  const NEW_WORKER_CHAT_MIN = 5000;
+  const NEW_WORKER_CHAT_MAX = 25000;
 
 
   const Z_BOARD  = 0;
   const Z_HP = 1;
   const Z_TASK_PROGRESS = 2;
   const Z_WORKER = 3;
-  const Z_HP_INACTIVE = 4;
+  const Z_HP_INACTIVE = Z_HP;
   const Z_WORKER_DAMAGE = 5;
   const Z_ORB = 5;
   const Z_HIGHLIGHT = 100;
 
   const dx = [-1, 1, 0, 0];
   const dy = [0, 0, -1, 1];
+  const dx_suffix = ['L', 'R', 'U', 'D'];
+  const hp_pos_x = [2, 3, 3, 3, 3, 2, 1, 0, 0, 0, 0, 1];
+  const hp_pos_y = [0, 0, 1, 2, 3, 3, 3, 3, 2, 1, 0, 0];
   let intervalID;
   const graphicsDevice = TurbulenzEngine.createGraphicsDevice({});
   const mathDevice = TurbulenzEngine.createMathDevice({});
@@ -141,8 +148,8 @@ TurbulenzEngine.onload = function onloadFn()
   loadTexture('test.png');
 
   // Viewport for Draw2D.
-  const game_width = 1280*1.5;
-  const game_height = 960*1.5;
+  let game_width = 1280;
+  let game_height = 960;
   const color_white = mathDevice.v4Build(1, 1, 1, 1);
   const color_green = mathDevice.v4Build(0, 1, 0, 1);
   const color_red = mathDevice.v4Build(1, 0, 0, 1);
@@ -156,14 +163,30 @@ TurbulenzEngine.onload = function onloadFn()
   const orb_tile_size = 16;
   const worker_scale = 0.67;
 
+  function htmlPos(x, y) {
+    const ymin = 0;
+    const ymax = game_height;
+    const xmin = 0;
+    const xmax = game_width;
+    return [100 * (x - xmin) / (xmax - xmin), 100 * (y - ymin) / (ymax - ymin)];
+  }
+
+  function notify(x, y, msg) {
+    let pos = htmlPos(x, y);
+    let child = $('<div class="floater" style="left: ' + pos[0] + '%; top: ' + pos[1] + '%;">' + msg + '</div>');
+    $('#dynamic_text').append(child);
+    setTimeout(function () {
+      child.addClass('fade');
+    }, 1);
+    setTimeout(function () {
+      child.remove();
+    }, 5000);
+  }
+
+
   // Cache keyCodes
   // const keyCodes = inputDevice.keyCodes;
   // const padCodes = input.padCodes;
-
-  const configureParams = {
-    scaleMode : 'scale',
-    viewportRectangle : mathDevice.v4Build(0, 0, game_width, game_height)
-  };
 
   let game_state;
 
@@ -186,6 +209,10 @@ TurbulenzEngine.onload = function onloadFn()
     }
     loadSprite('board', 256);
     loadSprite('highlight', 256);
+    loadSprite('highlight_L', 256);
+    loadSprite('highlight_R', 256);
+    loadSprite('highlight_U', 256);
+    loadSprite('highlight_D', 256);
     loadSprite('worker', 128);
     loadSprite('worker_damage', 128);
     loadSprite('dig_progress', 128);
@@ -194,6 +221,7 @@ TurbulenzEngine.onload = function onloadFn()
     loadSprite('exit', 128);
     loadSprite('orb', 128, orb_tile_size, [-24, -24]);
     loadSprite('hp', 32, hp_tile_size);
+    loadSprite('hp_center', 128, 40, [20, 20]);
   }
 
   class BoardEntry {
@@ -202,6 +230,9 @@ TurbulenzEngine.onload = function onloadFn()
       this.hp = 0;
       this.orb_countdown = 0;
       this.orb_out = false;
+      this.task_counter = 0;
+      this.show_at = 0;
+      this.notify_countdown = 0;
     }
   }
 
@@ -211,7 +242,6 @@ TurbulenzEngine.onload = function onloadFn()
       this.y = y;
       this.assigned_at = 0;
       this.task = '';
-      this.task_counter = 0;
       this.hp = WORKER_MAX_HP;
     }
   }
@@ -224,9 +254,10 @@ TurbulenzEngine.onload = function onloadFn()
       this.mobiles = [];
       this.orbs = [];
       this.num_escaped = 0;
+      this.selected_worker = null;
       let init_workers = 2;
 
-      let gen_range = 1;
+      let gen_range = TEST ? 2 : 1;
       for (let ii = -gen_range; ii <= gen_range; ++ii) {
         for (let jj = -gen_range; jj <= gen_range; ++jj) {
           this.mapSet(ii, jj, 'green', (jj !== 1) ? BOARD_MAX_HP : 0);
@@ -276,13 +307,14 @@ TurbulenzEngine.onload = function onloadFn()
       if (state && state !== 'red' && state !== 'new_worker' && state !== 'exit') {
         return false;
       }
+      let ret = [];
       for (let ii = 0; ii < dx.length; ++ii) {
         state = this.mapGet(x + dx[ii], y + dy[ii], 'state');
         if (state === 'green') {
-          return true;
+          ret.push(dx_suffix[ii]);
         }
       }
-      return false;
+      return ret.length ? ret : false;
     }
 
     mapSet(x, y, state, hp) {
@@ -294,9 +326,9 @@ TurbulenzEngine.onload = function onloadFn()
         }
         this.map[x][y].orb_out = false;
         if (hp) {
-          this.map[x][y].orb_countdown = GOOD_RATE * 0.5;
+          this.map[x][y].orb_countdown = (Math.random() * 0.25 + 0.25) * GOOD_RATE;
         } else if (state === 'red') {
-          this.map[x][y].orb_countdown = EVIL_RATE * 0.5;
+          this.map[x][y].orb_countdown = (Math.random() * 0.25 + 0.25) * EVIL_RATE;
         }
       }
       this.map[x][y].state = state;
@@ -311,17 +343,23 @@ TurbulenzEngine.onload = function onloadFn()
       }
       let neighbors = [];
       let board = this;
+      let counter = 0;
       function clear(x, y) {
         let existing_state = board.mapGet(x, y, 'state');
         if (existing_state && existing_state !== 'red') {
           return;
         }
         --size;
+        let show_at = global_timer + (counter * ROOM_OPEN_DELAY);
+        ++counter;
         board.mapSet(x, y, 'green', 0);
+        board.map[x][y].task_counter = 0;
+        board.map[x][y].show_at = show_at;
         for (let ii = 0; ii < dx.length; ++ii) {
           neighbors.push([x + dx[ii], y + dy[ii]]);
           if (!board.mapGet(x + dx[ii], y + dy[ii], 'state')) {
             board.mapSet(x + dx[ii], y + dy[ii], 'red');
+            board.map[x + dx[ii]][y + dy[ii]].show_at = show_at;
           }
         }
       }
@@ -505,7 +543,13 @@ TurbulenzEngine.onload = function onloadFn()
         }
       }
       if (evil) {
-        throw 'You died; Num escaped = ' + this.num_escaped + '/' + (TARGET_WORKERS + 2);
+        if (this.num_escaped) {
+          $('#win_stats').text(this.num_escaped + ' of ' + (TARGET_WORKERS + 2) + ' survived!');
+          game_state = winInit;
+        } else {
+          game_state = loseInit;
+        }
+        return [0, 0];
       }
       return null;
     }
@@ -560,6 +604,17 @@ TurbulenzEngine.onload = function onloadFn()
       }
     }
 
+    removeWorker(worker)
+    {
+      if (worker.moving) {
+        arrayRemove(this.mobiles, this.mobiles.indexOf(worker));
+      }
+      arrayRemove(this.workers, this.workers.indexOf(worker));
+      if (worker === this.selected_worker) {
+        this.selected_worker = null;
+      }
+    }
+
     updateOrbs() {
       for (let ii = this.orbs.length - 1; ii >= 0; --ii) {
         let orb = this.orbs[ii];
@@ -573,20 +628,19 @@ TurbulenzEngine.onload = function onloadFn()
             }
             if (!worker.hp) {
               // DIE
-              if (worker.moving) {
-                arrayRemove(this.mobiles, this.mobiles.indexOf(worker));
-              }
-              arrayRemove(this.workers, this.workers.indexOf(worker));
+              this.removeWorker(worker);
             }
             this.removeOrb(orb, ii);
             continue;
           }
         }
-        if (!orb.moving) {
-          let hp = this.mapGet(orb.x, orb.y, 'hp');
+        let int_x = Math.round(orb.x);
+        let int_y = Math.round(orb.y);
+        if (Math.abs(orb.x - int_x) + Math.abs(orb.y - int_y) < 0.25 && (orb.distance_traveled > 0.5 || int_x !== orb.orig_x || int_y !== orb.orig_y)) {
+          let hp = this.mapGet(int_x, int_y, 'hp');
           if (hp > 0 && (orb.evil || hp < BOARD_MAX_HP)) {
             // do damage and end
-            let be = this.mapGet(orb.x, orb.y);
+            let be = this.mapGet(int_x, int_y);
             if (orb.evil) {
               be.hp--;
             } else {
@@ -595,6 +649,8 @@ TurbulenzEngine.onload = function onloadFn()
             this.removeOrb(orb, ii);
             continue;
           }
+        }
+        if (!orb.moving) {
           let next = this.findNearestOrbTarget(orb.x, orb.y, orb.evil);
           if (next) {
             this.mobileGoTo(orb, next[0], next[1], (orb.evil ? SPEED_ORB_EVIL : SPEED_ORB_GOOD) * randFloat(0.9, 1));
@@ -625,9 +681,11 @@ TurbulenzEngine.onload = function onloadFn()
             mobile.y = mobile.next_y;
             mobile.next_x = null;
             dist -= max_delta;
+            mobile.distance_traveled = (mobile.distance_traveled || 0) + max_delta;
           } else {
             mobile.x += sign(delta_x) * dist;
             mobile.y += sign(delta_y) * dist;
+            mobile.distance_traveled = (mobile.distance_traveled || 0) + dist;
             dist = 0;
           }
         }
@@ -698,15 +756,17 @@ TurbulenzEngine.onload = function onloadFn()
       // Look for unassigned worker, choose closest
       let worker_idx = -1;
       let best = Infinity;
-      for (let ii = 0; ii < this.workers.length; ++ii) {
-        let worker = this.workers[ii];
-        if (worker.assigned_at && worker.task || worker.busy || worker.moving) {
-          continue;
-        }
-        let dist = Math.abs(worker.x - x) + Math.abs(worker.y - y);
-        if (dist < best) {
-          worker_idx = ii;
-          best = dist;
+      if (worker_idx === -1) {
+        for (let ii = 0; ii < this.workers.length; ++ii) {
+          let worker = this.workers[ii];
+          if (worker.assigned_at && worker.task || worker.busy || worker.moving) {
+            continue;
+          }
+          let dist = Math.abs(worker.x - x) + Math.abs(worker.y - y);
+          if (dist < best) {
+            worker_idx = ii;
+            best = dist;
+          }
         }
       }
       if (worker_idx === -1) {
@@ -721,38 +781,65 @@ TurbulenzEngine.onload = function onloadFn()
             worker_idx = ii;
           }
         }
-        if (worker_idx === -1) {
-          return;
-        }
       }
-      let worker = this.workers[worker_idx];
+      if (worker_idx === -1 && !this.selected_worker) {
+        return;
+      }
+      let worker = this.selected_worker || this.workers[worker_idx];
+      this.selected_worker = null;
       this.mobileGoTo(worker, x, y, SPEED_WORKER);
       worker.assigned_at = global_timer;
       worker.task = task;
-      worker.task_counter = 0;
     }
   }
 
-  let board_origin_x = game_width / 2 - board_tile_size/2;
-  let board_origin_y = game_height / 2 - board_tile_size/2;
   function b2sX(x) {
-    return board_origin_x + x * board_tile_size;
+    return game_width / 2 - board_tile_size/2 + x * board_tile_size;
   }
   function b2sY(y) {
-    return board_origin_y + y * board_tile_size;
+    return game_height / 2 - board_tile_size/2 + y * board_tile_size;
   }
   function s2bX(x) {
-    return Math.floor((x - board_origin_x) / board_tile_size);
+    return (x - (game_width / 2 - board_tile_size/2)) / board_tile_size;
   }
   function s2bY(y) {
-    return Math.floor((y - board_origin_y) / board_tile_size);
+    return (y - (game_height / 2 - board_tile_size/2)) / board_tile_size;
+  }
+  const chat_options = [
+    'Help me!',
+    'I\'m scared',
+    'Rescue me!',
+    'Oh, please no...',
+    'What was that noise?',
+    'Why am I here?',
+    'It\'s so dark...',
+    'I can\'t see anything...',
+    'Someone, please...',
+    'I need help...',
+    'Is that blood?',
+    'Who am I?',
+    'Where is that sound coming from?',
+    'Get me out of here...',
+    'I want to go home...',
+  ];
+  function randomHelpText() {
+    return chat_options[Math.floor(Math.random() * chat_options.length)];
   }
   function drawBoard(board, dt) {
+    let glow_pulse = 0.75 + 0.25 * Math.sin(global_timer/300) * Math.sin(global_timer/177);
+    let minx = Infinity;
+    let maxx = -Infinity;
+    let miny = Infinity;
+    let maxy = -Infinity;
     for (let xx in board.map) {
       const x = Number(xx);
+      minx = Math.min(x, minx);
+      maxx = Math.max(x, maxx);
       const draw_x = b2sX(x);
       for (let yy in board.map[x]) {
         const y = Number(yy);
+        miny = Math.min(y, miny);
+        maxy = Math.max(y, maxy);
         let be = board.mapGet(x, y);
         if (!be) {
           continue;
@@ -760,26 +847,48 @@ TurbulenzEngine.onload = function onloadFn()
         const draw_y = b2sY(y);
         switch (be.state) {
           case 'green':
-            draw_list.queue(graphics.board, draw_x, draw_y, Z_BOARD, color_white);
+            if (be.show_at <= global_timer) {
+              draw_list.queue(graphics.board, draw_x, draw_y, Z_BOARD, color_white);
+            }
             if (be.hp > 0) {
-              for (let ii = 0; ii < 16; ++ii) {
+              for (let ii = 0; ii < BOARD_MAX_HP; ++ii) {
                 let color = color_hp_inactive;
                 let z = Z_HP_INACTIVE;
-                if (be.hp >= 16 - ii) {
+                if (be.hp > ii) {
                   color = color_green;
                   z = Z_HP;
                 }
                 draw_list.queue(graphics.hp,
-                  draw_x + hp_tile_pad + (ii % 4) * hp_tile_size,
-                  draw_y + hp_tile_pad + Math.floor(ii / 4) * hp_tile_size,
+                  draw_x + hp_tile_pad + hp_pos_x[ii] * hp_tile_size,
+                  draw_y + hp_tile_pad + hp_pos_y[ii] * hp_tile_size,
                   z, color);
               }
+              draw_list.queue(graphics.hp_center,
+                draw_x + board_tile_size/2,
+                draw_y + board_tile_size/2,
+                Z_HP, [glow_pulse, glow_pulse, glow_pulse, 1]);
             }
             break;
           case 'red':
-            draw_list.queue(graphics.red, draw_x, draw_y, Z_BOARD, color_white);
+            let lifetime = global_timer - be.show_at;
+            if (lifetime >= 0) {
+              let color = color_white;
+              if (lifetime < RED_FADE_IN_TIME) {
+                color = [1, 1, 1, lifetime / RED_FADE_IN_TIME];
+              }
+              draw_list.queue(graphics.red, draw_x, draw_y, Z_BOARD, color);
+            }
             break;
           case 'new_worker':
+            if (be.notify_countdown === 0) {
+              be.notify_countdown = Math.random() * (NEW_WORKER_CHAT_MAX - NEW_WORKER_CHAT_MIN) + NEW_WORKER_CHAT_MIN;
+            }
+            if (dt >= be.notify_countdown) {
+              be.notify_countdown = 0;
+              notify(draw_x + board_tile_size/2, draw_y + board_tile_size/4, randomHelpText());
+            } else {
+              be.notify_countdown -= dt;
+            }
             draw_list.queue(graphics.worker, draw_x, draw_y, Z_BOARD, color_new_worker);
             break;
           case 'exit':
@@ -788,21 +897,41 @@ TurbulenzEngine.onload = function onloadFn()
         }
       }
     }
+    let game_width_fit = Math.max(450, board_tile_size * (Math.max(maxx,-minx)*2 + 1));
+    let game_height_fit = Math.max(450, board_tile_size * (Math.max(maxy,-miny)*2 + 1));
+    const ZOOM_SPEED = 200/1000;
+    let max_zoom = ZOOM_SPEED * dt;
+    if (game_width_fit < game_width) {
+      game_width = game_width_fit;
+    } else {
+      game_width = Math.min(game_width + max_zoom, game_width_fit);
+    }
+    if (game_height_fit < game_height) {
+      game_height = game_height_fit;
+    } else {
+      game_height = Math.min(game_height + max_zoom, game_height_fit);
+    }
     board.workers.forEach(function (worker) {
       // draw and update task progress
       let task = '';
       if (!worker.moving) {
         task = worker.task;
-        if (!task && board.mapGet(worker.x, worker.y, 'hp') < BOARD_MAX_HP) {
+        let be = board.mapGet(worker.x, worker.y);
+        if (task === 'dig' && be.state !== 'red') {
+          worker.task = '';
+          worker.assigned_at = 0;
+          task = '';
+        }
+        if (!task && be.hp < BOARD_MAX_HP) {
           task = 'repair';
         }
         if (task) {
           // update
-          worker.task_counter += dt;
-          worker.busy = true;
+          be.task_counter += dt;
           if (task === 'dig' || task === 'new_worker') {
+            worker.busy = true;
             let task_time = DIG_TIME;
-            if (worker.task_counter > task_time) {
+            if (be.task_counter > task_time) {
               // done!
               let new_pos = board.findNearestEmpty(worker.x, worker.y);
               switch (task) {
@@ -819,54 +948,56 @@ TurbulenzEngine.onload = function onloadFn()
               }
               worker.task = '';
               worker.assigned_at = 0;
-              worker.task_counter = 0;
               worker.busy = false;
               board.mobileGoTo(worker, new_pos[0], new_pos[1], SPEED_WORKER);
             }
           } else if (task === 'repair') {
             let task_time = REPAIR_TIME;
             let be = board.mapGet(worker.x, worker.y);
-            while (worker.task_counter > task_time) {
-              worker.task_counter -= task_time;
+            while (be.task_counter > task_time) {
+              be.task_counter -= task_time;
               be.hp = Math.min(BOARD_MAX_HP, be.hp + 1);
             }
-            if (be.hp === BOARD_MAX_HP) {
+            if (be.hp < BOARD_MAX_HP - 2) {
+              worker.busy = true;
+            } else if (be.hp === BOARD_MAX_HP) {
               // let new_pos = board.findNearestEmpty(worker.x, worker.y);
               worker.assigned_at = 0;
-              worker.task_counter = 0;
+              be.task_counter = 0;
               worker.busy = false;
               // board.mobileGoTo(worker, new_pos[0], new_pos[1], SPEED_WORKER);
-            }
+            } // else leave busy
           } else if (task === 'exit') {
             board.num_escaped++;
             // remove worker
-            arrayRemove(board.workers, board.workers.indexOf(worker));
+            board.removeWorker(worker);
           }
         } else {
-          worker.task_counter = 0;
           worker.busy = false;
         }
-      }
-      // draw
-      if (task && task !== 'exit') {
-        let sprite, progress;
-        let scale = 1;
-        let z = Z_TASK_PROGRESS;
-        switch (task) {
-          case 'repair':
-            sprite = graphics.hp_progress;
-            progress = 0.92 * worker.task_counter / REPAIR_TIME;
-            scale = worker_scale;
-            z = Z_WORKER + 1;
-            break;
-          case 'new_worker':
-          case 'dig':
-            sprite = graphics.dig_progress;
-            progress = worker.task_counter / DIG_TIME;
-            break;
+        // draw task progress
+        if (task && task !== 'exit') {
+          let sprite, progress;
+          let scale = 1;
+          let z = Z_TASK_PROGRESS;
+          switch (task) {
+            case 'repair':
+              sprite = graphics.hp_progress;
+              progress = 0.92 * be.task_counter / REPAIR_TIME;
+              scale = worker_scale;
+              z = Z_WORKER + 1;
+              break;
+            case 'new_worker':
+            case 'dig':
+              sprite = graphics.dig_progress;
+              progress = be.task_counter / DIG_TIME;
+              break;
+          }
+          draw_list.queue(sprite, b2sX(worker.x + (1 - scale)/2), b2sY(worker.y + (1 - progress)*scale + (1-scale)/2), z, color_yellow,
+            [1 * scale, progress * scale], mathDevice.v4Build(0, 128 * (1 - progress), 128, 128));
         }
-        draw_list.queue(sprite, b2sX(worker.x + (1 - scale)/2), b2sY(worker.y + (1 - progress)*scale + (1-scale)/2), z, color_yellow,
-          [1 * scale, progress * scale], mathDevice.v4Build(0, 128 * (1 - progress), 128, 128));
+      } else {
+        worker.busy = false;
       }
 
       // draw worker
@@ -879,14 +1010,34 @@ TurbulenzEngine.onload = function onloadFn()
           color = [0.8, 1, 0.8, 1];
           break;
       }
-      draw_list.queue(graphics.worker, b2sX(worker.x + (1 - worker_scale)/2), b2sY(worker.y + (1 - worker_scale)/2), Z_WORKER,
+      let draw_x = worker.x;
+      let draw_y = worker.y;
+      if (board.mapGet(Math.round(worker.x), Math.round(worker.y), 'state') === 'green') {
+        worker.last_safe_x = worker.x;
+        worker.last_safe_y = worker.y;
+        worker.using_safe = false;
+      } else {
+        draw_x = worker.last_safe_x;
+        draw_y = worker.last_safe_y;
+        worker.using_safe = true;
+      }
+      worker.draw_x = draw_x;
+      worker.draw_y = draw_y;
+      draw_list.queue(graphics.worker, b2sX(draw_x + (1 - worker_scale)/2), b2sY(draw_y + (1 - worker_scale)/2), Z_WORKER,
         color, [worker_scale, worker_scale]);
 
-      if (worker.hp < WORKER_MAX_HP) {
+      let hp = worker.hp;
+      if (hp < WORKER_MAX_HP) {
         // draw worker injury
-        let damage = 0.1 + 0.8 * (WORKER_MAX_HP - worker.hp) / WORKER_MAX_HP;
-        draw_list.queue(graphics.worker_damage, b2sX(worker.x + (1 - worker_scale)/2), b2sY(worker.y + (1 - damage)*worker_scale + (1-worker_scale)/2), Z_WORKER_DAMAGE, color_red,
+        let damage = 0.1 + 0.8 * (WORKER_MAX_HP - hp) / WORKER_MAX_HP;
+        draw_list.queue(graphics.worker_damage, b2sX(draw_x + (1 - worker_scale)/2), b2sY(draw_y + (1 - damage)*worker_scale + (1-worker_scale)/2), Z_WORKER_DAMAGE, color_red,
           [1 * worker_scale, damage * worker_scale], mathDevice.v4Build(0, 128 * (1 - damage), 128, 128));
+      }
+
+      if (worker === board.selected_worker) {
+        let scale = 0.95;
+        draw_list.queue(graphics.highlight, b2sX(draw_x + (1 - scale)/2), b2sY(draw_y + (1 - scale)/2), Z_HIGHLIGHT, [1, 1, 0, 1],
+          [scale, scale]);
       }
     });
     board.orbs.forEach(function (orb) {
@@ -907,15 +1058,30 @@ TurbulenzEngine.onload = function onloadFn()
   function checkMouse(board)
   {
     let mouse_pos = input.mousePos();
-    let x = s2bX(mouse_pos[0]);
-    let y = s2bY(mouse_pos[1]);
+    let fx = s2bX(mouse_pos[0]);
+    let fy = s2bY(mouse_pos[1]);
+    let x = Math.floor(fx);
+    let y = Math.floor(fy);
+    fx -= 0.5;
+    fy -= 0.5;
     let state = board.mapGet(x, y, 'state');
     let highlight = false;
-    if (state === 'green') {
+    let highlight_worker;
+    for (let ii = 0; ii < board.workers.length; ++ii) {
+      let worker = board.workers[ii];
+      if (Math.sqrt(Math.abs(fx - worker.draw_x)*Math.abs(fx - worker.draw_x) + Math.abs(fy - worker.draw_y)*Math.abs(fy - worker.draw_y)) < 0.65) {
+        // near worker!
+        highlight = [Math.random(), 1, Math.random(), 1];
+        highlight_worker = worker;
+      }
+    }
+    let neighbor;
+    if (!highlight && state === 'green') {
       highlight = color_green;
-    } else {
+    } else if (!highlight) {
       // is neighbor green?
-      if (board.mapIsNeighbor(x, y)) {
+      neighbor = board.mapIsNeighbor(x, y);
+      if (neighbor) {
         if (state === 'new_worker') {
           highlight = color_white;
         } else if (state === 'exit') {
@@ -925,8 +1091,28 @@ TurbulenzEngine.onload = function onloadFn()
         }
       }
     }
-    if (highlight) {
-      draw_list.queue(graphics.highlight, b2sX(x), b2sY(y), Z_HIGHLIGHT, highlight);
+    if (highlight_worker) {
+      // draw it smaller, just around the worker
+      let scale = 0.9;
+      draw_list.queue(graphics.highlight, b2sX(highlight_worker.draw_x + (1 - scale)/2), b2sY(highlight_worker.draw_y + (1 - scale)/2), Z_HIGHLIGHT, highlight,
+        [scale, scale]);
+      if (input.clickHit(-Infinity, -Infinity, Infinity, Infinity)) {
+        // select worker
+        if (board.selected_worker === highlight_worker) {
+          board.selected_worker = null;
+        } else {
+          board.selected_worker = highlight_worker;
+        }
+      }
+    } else if (highlight) {
+      if (neighbor) {
+        // draw segmented
+        for (let ii = 0; ii < neighbor.length; ++ii) {
+          draw_list.queue(graphics['highlight_' + neighbor[ii]], b2sX(x), b2sY(y), Z_HIGHLIGHT, highlight);
+        }
+      } else {
+        draw_list.queue(graphics.highlight, b2sX(x), b2sY(y), Z_HIGHLIGHT, highlight);
+      }
       if (input.clickHit(-Infinity, -Infinity, Infinity, Infinity)) {
         board.assignWork(x, y, state === 'red' ? 'dig' : state === 'new_worker' ? 'new_worker' :
           state === 'exit' ? 'exit' : '');
@@ -934,8 +1120,7 @@ TurbulenzEngine.onload = function onloadFn()
     }
   }
 
-  let board = new Board();
-
+  let board;
   function play(dt) {
     if (!board.workers.length) {
       dt = dt * 10;
@@ -948,6 +1133,7 @@ TurbulenzEngine.onload = function onloadFn()
   }
 
   function playInit(dt) {
+    board = new Board();
     initGraphics();
     $('.screen').hide();
     $('#play').show();
@@ -992,9 +1178,36 @@ TurbulenzEngine.onload = function onloadFn()
     title(dt);
   }
 
-  game_state = titleInit;
+
+  $('.play_again').click(function () {
+    game_state = playInit;
+  });
+
+  function lose() {
+  }
+
+  function loseInit(dt) {
+    $('.screen').hide();
+    $('#lose').show();
+    game_state = lose;
+    lose(dt);
+  }
+
+  function win() {
+  }
+
+  function winInit(dt) {
+    $('.screen').hide();
+    $('#win').show();
+    game_state = win;
+    win(dt);
+  }
+
+  game_state = playInit;
 
   let last_tick = Date.now();
+  let last_game_width = game_width;
+  let last_game_height = game_height;
   function tick() {
     if (!graphicsDevice.beginFrame()) {
       return;
@@ -1010,6 +1223,11 @@ TurbulenzEngine.onload = function onloadFn()
       let screen_height = graphicsDevice.height;
       let screen_aspect = screen_width / screen_height;
       let view_aspect = game_width / game_height;
+      const configureParams = {
+        scaleMode : 'scale',
+        viewportRectangle : mathDevice.v4Build(0, 0, game_width, game_height)
+      };
+
       if (screen_aspect > view_aspect) {
         let viewport_width = game_height * screen_aspect;
         let half_diff = (viewport_width - game_width) / 2;
@@ -1022,8 +1240,12 @@ TurbulenzEngine.onload = function onloadFn()
       draw2D.configure(configureParams);
     }
 
-    if (window.need_repos) {
-      --window.need_repos;
+    if (window.need_repos || game_width !== last_game_width || game_height !== last_game_height) {
+      if (window.need_repos) {
+        --window.need_repos;
+      }
+      last_game_width = game_width;
+      last_game_height = game_height;
       const ul = draw2D.viewportUnmap(0, 0);
       const lr = draw2D.viewportUnmap(game_width-1, game_height-1);
       const viewport = [ul[0], ul[1], lr[0], lr[1]];

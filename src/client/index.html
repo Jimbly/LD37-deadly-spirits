@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
   <head>
-    <title>Powered by Turbulenz</title>
+    <title>Deadly Spirits - LD37</title>
 
     <script src="vendor/jquery-1.11.3.min.js"></script>
 
@@ -18,15 +18,40 @@
         </a>
       </canvas>
       <div id="gamescreen" class="screenwrap">
+        <div id="dynamic_text"></div>
         <div id="title" class="screen vflex" style="display: none;">
           <div class="flexcenter" style="text-align: center;">
             <h1>Powered by Turbulenz</h1>
           </div>
           <div class="flexcenter" style="flex:3; text-align: center;"></div>
         </div>
+        <div id="lose" class="screen vflex" style="display: none; pointer-events: auto;">
+          <div class="flexcenter" style="flex:1; text-align: center;"></div>
+          <div class="flexcenter" style="text-align: center;">
+            <h1 style="color: red;">You lose</h1>
+            <h2>Your last worker succumbed to the dark.</h2>
+
+            <h3>Thank you for playing <i>Deadly Spirits</i> by Jimb Esser</h3>
+
+            <div><button class="play_again">Play Again</button></div>
+          </div>
+          <div class="flexcenter" style="flex:3; text-align: center;"></div>
+        </div>
+        <div id="win" class="screen vflex" style="display: none; pointer-events: auto;">
+          <div class="flexcenter" style="flex:1; text-align: center;"></div>
+          <div class="flexcenter" style="text-align: center;">
+            <h1 style="color: green;">You escaped!</h1>
+            <h2 id="win_stats"></h2>
+
+            <h3>Thank you for playing <i>Deadly Spirits</i> by Jimb Esser</h3>
+
+            <div><button class="play_again">Play Again</button></div>
+          </div>
+          <div class="flexcenter" style="flex:3; text-align: center;"></div>
+        </div>
       </div>
       <div id="fullscreen" class="screenwrap">
-        <div id="play" class="screen vflex" style="display: none;">
+        <div id="play" class="screen vflex" style="display: none; position: relative;">
           <div class="flexcenter" style="flex:1; text-align: center;"></div>
           <div class="hflex" id="something"></div>
           <div class="flexcenter" style="flex:1; text-align: center;"></div>
