@@ -10,16 +10,29 @@
 
 TurbulenzEngine.onload = function onloadFn()
 {
-  const TASK_TIME = 1000; //8000;
+  const TEST = false;
+
+  const DIG_TIME = TEST ? 1000 : 8000;
   const REPAIR_TIME = 8000/16;
   const BOARD_MAX_HP = 16;
-  const WORKER_SPEED = 4/1000;
+  const WORKER_MAX_HP = 20;
+  const SPEED_WORKER = 4/1000;
+  const SPEED_ORB_EVIL = 1/1000;
+  const SPEED_ORB_GOOD = 1/1000;
+  const TARGET_WORKERS = TEST ? 0 : 4;
+  const TARGET_WORKER_RANGE = TEST ? [3,6] : [8, 12];
+  const EVIL_RATE = 3000;
+  const GOOD_RATE = 3000;
+  const EXIT_DIST = TEST ? 2 : 6;
+
 
   const Z_BOARD  = 0;
   const Z_HP = 1;
   const Z_TASK_PROGRESS = 2;
   const Z_WORKER = 3;
   const Z_HP_INACTIVE = 4;
+  const Z_WORKER_DAMAGE = 5;
+  const Z_ORB = 5;
   const Z_HIGHLIGHT = 100;
 
   const dx = [-1, 1, 0, 0];
@@ -34,7 +47,11 @@ TurbulenzEngine.onload = function onloadFn()
   const input = require('./input.js').create(inputDevice, draw2D);
   const draw_list = require('./draw_list.js').create(draw2D);
   const random_seed = require('random-seed');
-  let rand = random_seed.create('appleseed');
+  let rand = random_seed.create('seed1');
+
+  function randFloat(min, max) {
+    return Math.random() * (max - min) + min;
+  }
 
   let soundDeviceParameters = {
     linearDistance : false
@@ -60,6 +77,10 @@ TurbulenzEngine.onload = function onloadFn()
   function sign(x) {
     return x < 0 ? -1:
       x > 0 ? 1 : 0;
+  }
+  function arrayRemove(arr, idx) {
+    arr[idx] = arr[arr.length - 1];
+    arr.pop();
   }
 
   let sounds = {};
@@ -120,11 +141,11 @@ TurbulenzEngine.onload = function onloadFn()
   loadTexture('test.png');
 
   // Viewport for Draw2D.
-  const game_width = 1280;
-  const game_height = 960;
+  const game_width = 1280*1.5;
+  const game_height = 960*1.5;
   const color_white = mathDevice.v4Build(1, 1, 1, 1);
   const color_green = mathDevice.v4Build(0, 1, 0, 1);
-  //const color_red = mathDevice.v4Build(1, 0, 0, 1);
+  const color_red = mathDevice.v4Build(1, 0, 0, 1);
   const color_hp_inactive = mathDevice.v4Build(0.5, 0, 0, 0.5);
   const color_yellow = mathDevice.v4Build(1, 1, 0, 1);
   const color_new_worker = mathDevice.v4Build(1, 1, 1, 0.25);
@@ -132,6 +153,7 @@ TurbulenzEngine.onload = function onloadFn()
   const board_tile_size = 64;
   const hp_tile_size = board_tile_size / 6;
   const hp_tile_pad = hp_tile_size;
+  const orb_tile_size = 16;
   const worker_scale = 0.67;
 
   // Cache keyCodes
@@ -150,13 +172,13 @@ TurbulenzEngine.onload = function onloadFn()
   function initGraphics() {
     const sprite_size = 64;
     let color_sprite = color_white;
-    function loadSprite(name, texres, size_override) {
+    function loadSprite(name, texres, size_override, origin_override) {
       graphics[name] = createSprite(name + '.png', {
         width : size_override || sprite_size,
         height : size_override || sprite_size,
         x : 0,
         y : 0,
-        origin: [0,0],
+        origin: origin_override || [0,0],
         rotation : 0,
         color : color_sprite,
         textureRectangle : mathDevice.v4Build(0, 0, texres, texres)
@@ -165,9 +187,12 @@ TurbulenzEngine.onload = function onloadFn()
     loadSprite('board', 256);
     loadSprite('highlight', 256);
     loadSprite('worker', 128);
+    loadSprite('worker_damage', 128);
     loadSprite('dig_progress', 128);
     loadSprite('hp_progress', 128);
     loadSprite('red', 128);
+    loadSprite('exit', 128);
+    loadSprite('orb', 128, orb_tile_size, [-24, -24]);
     loadSprite('hp', 32, hp_tile_size);
   }
 
@@ -175,6 +200,8 @@ TurbulenzEngine.onload = function onloadFn()
     constructor() {
       this.state = null;
       this.hp = 0;
+      this.orb_countdown = 0;
+      this.orb_out = false;
     }
   }
 
@@ -185,18 +212,23 @@ TurbulenzEngine.onload = function onloadFn()
       this.assigned_at = 0;
       this.task = '';
       this.task_counter = 0;
+      this.hp = WORKER_MAX_HP;
     }
   }
 
   class Board {
     constructor() {
+      this.open_count = 0;
       this.map = [];
       this.workers = [];
       this.mobiles = [];
+      this.orbs = [];
+      this.num_escaped = 0;
       let init_workers = 2;
 
-      for (let ii = -1; ii <= 1; ++ii) {
-        for (let jj = -1; jj <= 1; ++jj) {
+      let gen_range = 1;
+      for (let ii = -gen_range; ii <= gen_range; ++ii) {
+        for (let jj = -gen_range; jj <= gen_range; ++jj) {
           this.mapSet(ii, jj, 'green', (jj !== 1) ? BOARD_MAX_HP : 0);
           if (init_workers) {
             --init_workers;
@@ -204,15 +236,30 @@ TurbulenzEngine.onload = function onloadFn()
           }
         }
       }
-      for (let ii = -2; ii <= 2; ++ii) {
-        for (let jj = -2; jj <= 2; ++jj) {
+      for (let ii = -(gen_range + 1); ii <= (gen_range + 1); ++ii) {
+        for (let jj = -(gen_range + 1); jj <= (gen_range + 1); ++jj) {
           if (this.mapIsNeighbor(ii, jj)) {
             this.mapSet(ii, jj, 'red');
           }
         }
       }
 
-      this.mapSet(3, 5, 'new_worker');
+      for (let ii = 0; ii < TARGET_WORKERS; ++ii) {
+        do {
+          let angle = rand.floatBetween(0, 2 * Math.PI);
+          let x = Math.cos(angle);
+          let y = Math.sin(angle);
+          let dist = rand.floatBetween(TARGET_WORKER_RANGE[0], TARGET_WORKER_RANGE[1]);
+          x = Math.round(x * dist);
+          y = Math.round(y * dist);
+          if (!this.mapGet(x, y, 'state')) {
+            this.mapSet(x, y, 'new_worker');
+            break;
+          }
+        } while (true);
+      }
+
+      this.checkGenerateExit();
     }
 
     mapGet(x, y, field) {
@@ -226,7 +273,7 @@ TurbulenzEngine.onload = function onloadFn()
 
     mapIsNeighbor(x, y) {
       let state = this.mapGet(x, y, 'state');
-      if (state && state !== 'red' && state !== 'new_worker') {
+      if (state && state !== 'red' && state !== 'new_worker' && state !== 'exit') {
         return false;
       }
       for (let ii = 0; ii < dx.length; ++ii) {
@@ -241,13 +288,24 @@ TurbulenzEngine.onload = function onloadFn()
     mapSet(x, y, state, hp) {
       this.map[x] = this.map[x] || [];
       this.map[x][y] = this.map[x][y] || new BoardEntry();
+      if (this.map[x][y].state !== state) {
+        if (this.map[x][y].state === 'red' || !this.map[x][y].state && state !== 'red') {
+          this.open_count++;
+        }
+        this.map[x][y].orb_out = false;
+        if (hp) {
+          this.map[x][y].orb_countdown = GOOD_RATE * 0.5;
+        } else if (state === 'red') {
+          this.map[x][y].orb_countdown = EVIL_RATE * 0.5;
+        }
+      }
       this.map[x][y].state = state;
       this.map[x][y].hp = hp;
     }
 
     generateRoom(x, y, force_size) {
       const sizes = [3, 10, 20];
-      let size = 2 + rand(sizes[rand(sizes.length)]);
+      let size = 2 + Math.floor(this.open_count / 20) + rand(sizes[rand(sizes.length)]);
       if (force_size) {
         size = force_size;
       }
@@ -276,20 +334,30 @@ TurbulenzEngine.onload = function onloadFn()
 
     // Nearest 'green' square without a worker
     findNearestEmpty(x, y) {
-      let d = 1;
       let worker_at = [];
       this.workers.forEach(function (worker) {
-        worker_at[worker.x] = worker_at[worker.x] || [];
-        worker_at[worker.x][worker.y] = true;
+        let x = worker.x;
+        let y = worker.y;
+        if (worker.moving) {
+          x = worker.dest_x;
+          y = worker.dest_y;
+        }
+        worker_at[x] = worker_at[x] || [];
+        worker_at[x][y] = true;
       });
       let board = this;
-      function test(x, y) {
-        if (board.mapGet(x, y, 'state') === 'green') {
-          if (!worker_at[x] || !worker_at[x][y]) {
-            return [x, y];
-          }
+      function test(x, y, only_hp) {
+        if (board.mapGet(x, y, 'state') !== 'green') {
+          return;
+        }
+        if (only_hp && !board.mapGet(x, y, 'hp')) {
+          return;
+        }
+        if (!worker_at[x] || !worker_at[x][y]) {
+          return [x, y];
         }
       }
+      let d = 1;
       while (true) {
         let r;
         let vvs = [
@@ -299,12 +367,14 @@ TurbulenzEngine.onload = function onloadFn()
           [1, 1],
         ];
         for (let ii = 0; ii <= d; ++ii) {
-          for (let jj = 0; jj < vvs.length; ++jj) {
-            if ((r = test(x + vvs[jj][0] * ii, y + vvs[jj][1] * d))) {
-              return r;
-            }
-            if ((r = test(x + vvs[jj][0] * d, y + vvs[jj][1] * ii))) {
-              return r;
+          for (let kk = 0; kk < 2; ++kk) {
+            for (let jj = 0; jj < vvs.length; ++jj) {
+              if ((r = test(x + vvs[jj][0] * ii, y + vvs[jj][1] * d, !kk))) {
+                return r;
+              }
+              if ((r = test(x + vvs[jj][0] * d, y + vvs[jj][1] * ii, !kk))) {
+                return r;
+              }
             }
           }
         }
@@ -326,8 +396,8 @@ TurbulenzEngine.onload = function onloadFn()
 
     mobileFindNext(mobile)
     {
-      let x = mobile.x;
-      let y = mobile.y;
+      let x = Math.round(mobile.x);
+      let y = Math.round(mobile.y);
       let destx = mobile.dest_x;
       let desty = mobile.dest_y;
       let next = [];
@@ -366,6 +436,173 @@ TurbulenzEngine.onload = function onloadFn()
       throw 'Cannot find path';
     }
 
+    workerAt(x, y)
+    {
+      for (let ii = 0; ii < this.workers.length; ++ii) {
+        if (Math.round(this.workers[ii].x) === x && Math.round(this.workers[ii].y) === y) {
+          return this.workers[ii];
+        }
+      }
+      return false;
+    }
+
+    workerNear(x, y, orb_evil)
+    {
+      for (let ii = 0; ii < this.workers.length; ++ii) {
+        if (Math.abs(x - this.workers[ii].x) < 0.25 && Math.abs(y - this.workers[ii].y) < 0.25) {
+          if (orb_evil && this.mapGet(Math.round(this.workers[ii].x), Math.round(this.workers[ii].y), 'hp') > 0) {
+            // on a fortified square, orbs won't hit them
+            continue;
+          }
+          return this.workers[ii];
+        }
+      }
+      return false;
+    }
+
+    isGood(x, y)
+    {
+      return this.mapGet(x, y, 'hp') > 0 || this.workerAt(x, y);
+    }
+
+    needsHealing(x, y)
+    {
+      let hp = this.mapGet(x, y, 'hp');
+      let worker = this.workerAt(x, y);
+      return hp > 0 && hp < BOARD_MAX_HP || worker && worker.hp < WORKER_MAX_HP;
+    }
+
+    findNearestOrbTarget(x, y, evil)
+    {
+      let next = [];
+      let done = [];
+      let start_key = x + '_' + y;
+      done[start_key] = true;
+      next.push([x, y]);
+      while (next.length) {
+        let check = next.splice(0, 1)[0];
+        for (let ii = 0; ii < dx.length; ++ii) {
+          let nextx = check[0] + dx[ii];
+          let nexty = check[1] + dy[ii];
+          let key = nextx + '_' + nexty;
+          if (evil) {
+            if (this.isGood(nextx, nexty)) {
+              return [nextx, nexty];
+            }
+          } else {
+            if (this.needsHealing(nextx, nexty)) {
+              return [nextx, nexty];
+            }
+          }
+          if (this.mapGet(nextx, nexty, 'state') !== 'green') {
+            continue;
+          }
+          if (done[key]) {
+            continue;
+          }
+          done[key] = true;
+          next.push([nextx, nexty]);
+        }
+      }
+      if (evil) {
+        throw 'You died; Num escaped = ' + this.num_escaped + '/' + (TARGET_WORKERS + 2);
+      }
+      return null;
+    }
+
+    emitOrb(x, y, evil) {
+      let orb = {
+        x,
+        y,
+        evil,
+        detail_x: 0,
+        detail_y: 0,
+        orig_x: x,
+        orig_y: y,
+      };
+      this.orbs.push(orb);
+      let be = this.mapGet(x, y);
+      be.orb_out = true;
+      let next = this.findNearestOrbTarget(x, y, evil);
+      if (next) {
+        this.mobileGoTo(orb, next[0], next[1], (evil ? SPEED_ORB_EVIL : SPEED_ORB_GOOD) * randFloat(0.8, 1));
+      }
+    }
+
+    updateOrbSpawn(dt) {
+      for (let xx in this.map) {
+        let x = Number(xx);
+        for (let yy in this.map[x]) {
+          let y = Number(yy);
+          let be = this.mapGet(x, y);
+          if (!be) {
+            continue;
+          }
+          if (be.state === 'red' || be.hp && this.workers.length) {
+            be.orb_countdown -= dt;
+            if (be.orb_countdown < 0 && (!be.orb_out || be.state === 'red')) {
+              be.orb_countdown = be.hp ? GOOD_RATE : EVIL_RATE;
+              this.emitOrb(x, y, !be.hp);
+            }
+          }
+        }
+      }
+    }
+
+    removeOrb(orb, idx) {
+      if (orb.moving) {
+        arrayRemove(this.mobiles, this.mobiles.indexOf(orb));
+      }
+      arrayRemove(this.orbs, idx);
+      let be = this.mapGet(orb.orig_x, orb.orig_y);
+      if ((be.state === 'red') === orb.evil) {
+        be.orb_out = false;
+      }
+    }
+
+    updateOrbs() {
+      for (let ii = this.orbs.length - 1; ii >= 0; --ii) {
+        let orb = this.orbs[ii];
+        let worker;
+        if ((worker = this.workerNear(orb.x, orb.y, orb.evil))) {
+          if (orb.evil || worker.hp < WORKER_MAX_HP) {
+            if (orb.evil) {
+              worker.hp--;
+            } else {
+              worker.hp++;
+            }
+            if (!worker.hp) {
+              // DIE
+              if (worker.moving) {
+                arrayRemove(this.mobiles, this.mobiles.indexOf(worker));
+              }
+              arrayRemove(this.workers, this.workers.indexOf(worker));
+            }
+            this.removeOrb(orb, ii);
+            continue;
+          }
+        }
+        if (!orb.moving) {
+          let hp = this.mapGet(orb.x, orb.y, 'hp');
+          if (hp > 0 && (orb.evil || hp < BOARD_MAX_HP)) {
+            // do damage and end
+            let be = this.mapGet(orb.x, orb.y);
+            if (orb.evil) {
+              be.hp--;
+            } else {
+              be.hp++;
+            }
+            this.removeOrb(orb, ii);
+            continue;
+          }
+          let next = this.findNearestOrbTarget(orb.x, orb.y, orb.evil);
+          if (next) {
+            this.mobileGoTo(orb, next[0], next[1], (orb.evil ? SPEED_ORB_EVIL : SPEED_ORB_GOOD) * randFloat(0.9, 1));
+          }
+        }
+      }
+    }
+
     updateMobiles(dt) {
       for (let ii = this.mobiles.length - 1; ii >= 0; --ii) {
         let mobile = this.mobiles[ii];
@@ -374,8 +611,7 @@ TurbulenzEngine.onload = function onloadFn()
           if (mobile.next_x === null) {
             if (mobile.x === mobile.dest_x && mobile.y === mobile.dest_y) {
               // done!
-              this.mobiles[ii] = this.mobiles[this.mobiles.length - 1];
-              this.mobiles.pop();
+              arrayRemove(this.mobiles, ii);
               mobile.moving = false;
               break;
             }
@@ -398,12 +634,64 @@ TurbulenzEngine.onload = function onloadFn()
       }
     }
 
+    checkGenerateExit() {
+      let dist = [];
+      let spread = [];
+      for (let xx in this.map) {
+        const x = Number(xx);
+        for (let yy in this.map[x]) {
+          const y = Number(yy);
+          let state =  this.mapGet(x, y, 'state');
+          if (state === 'new_worker') {
+            return;
+          }
+          if (state === 'green') {
+            dist[x] = dist[x] || [];
+            dist[x][y] = 1;
+            spread.push([x, y, 1]);
+          }
+        }
+      }
+      // place an exit N steps away from explored territory, nearest the center
+      while (spread.length) {
+        let next = spread.splice(0, 1)[0];
+        let new_dist = next[2] + 1;
+        if (new_dist === EXIT_DIST + 1) {
+          break;
+        }
+        for (let ii = 0; ii < dx.length; ++ii) {
+          let x = next[0] + dx[ii];
+          let y = next[1] + dy[ii];
+          dist[x] = dist[x] || [];
+          if (!dist[x][y]) {
+            dist[x][y] = new_dist;
+            spread.push([x,y,new_dist]);
+          }
+        }
+      }
+      // everything in spread is distance = EXIT_DIST away
+      let best = -1;
+      let best_dist = Infinity;
+      for (let ii = 0; ii < spread.length; ++ii) {
+        let dist = Math.abs(spread[ii][0]) + Math.abs(spread[ii][1]);
+        if (dist < best_dist) {
+          best = ii;
+          best_dist = dist;
+        }
+      }
+      this.mapSet(spread[best][0], spread[best][1], 'exit');
+    }
+
     assignWork(x, y, task) {
-      // Do nothing if someone alread ythere
-      for (let ii = 0; ii < this.workers.length; ++ii) {
-        let worker = this.workers[ii];
-        if (worker.x === x && worker.y === y) {
-          return;
+      // Do nothing if someone already (going) there
+      if (task !== 'exit') {
+        for (let ii = 0; ii < this.workers.length; ++ii) {
+          let worker = this.workers[ii];
+          if (worker.moving && worker.dest_x === x && worker.dest_y === y ||
+            worker.x === x && worker.y === y
+          ) {
+            return;
+          }
         }
       }
 
@@ -412,10 +700,7 @@ TurbulenzEngine.onload = function onloadFn()
       let best = Infinity;
       for (let ii = 0; ii < this.workers.length; ++ii) {
         let worker = this.workers[ii];
-        if (worker.assigned_at) {
-          continue;
-        }
-        if (worker.moving) {
+        if (worker.assigned_at && worker.task || worker.busy || worker.moving) {
           continue;
         }
         let dist = Math.abs(worker.x - x) + Math.abs(worker.y - y);
@@ -425,13 +710,24 @@ TurbulenzEngine.onload = function onloadFn()
         }
       }
       if (worker_idx === -1) {
-        return;
+        // No free workers, look for oldest assigned repairer who is not moving
+        for (let ii = 0; ii < this.workers.length; ++ii) {
+          let worker = this.workers[ii];
+          if (worker.task) {
+            continue;
+          }
+          if (worker.assigned_at < best) {
+            best = worker.assigned_at;
+            worker_idx = ii;
+          }
+        }
+        if (worker_idx === -1) {
+          return;
+        }
       }
       let worker = this.workers[worker_idx];
-      this.mobileGoTo(worker, x, y, WORKER_SPEED);
-      if (task) {
-        worker.assigned_at = global_timer;
-      }
+      this.mobileGoTo(worker, x, y, SPEED_WORKER);
+      worker.assigned_at = global_timer;
       worker.task = task;
       worker.task_counter = 0;
     }
@@ -486,67 +782,87 @@ TurbulenzEngine.onload = function onloadFn()
           case 'new_worker':
             draw_list.queue(graphics.worker, draw_x, draw_y, Z_BOARD, color_new_worker);
             break;
+          case 'exit':
+            draw_list.queue(graphics.exit, draw_x, draw_y, Z_BOARD, [0.75 + 0.25 * Math.sin(global_timer/100), 0.75 + 0.25 * Math.sin(global_timer/107), 0.75 + 0.25 * Math.sin(global_timer/234), 1]);
+            break;
         }
       }
     }
     board.workers.forEach(function (worker) {
       // draw and update task progress
-      if (worker.task && !worker.moving) {
-        // update
-        worker.task_counter += dt;
-        if (worker.task === 'dig' || worker.task === 'new_worker') {
-          let task_time = TASK_TIME;
-          if (worker.task_counter > task_time) {
-            // done!
-            let new_pos = board.findNearestEmpty(worker.x, worker.y);
-            switch (worker.task) {
-              case 'dig':
-                board.generateRoom(worker.x, worker.y);
-                break;
-              case 'new_worker':
-                let new_worker = new Worker(worker.x, worker.y);
-                board.workers.push(new_worker);
-                board.mapSet(worker.x, worker.y, 'red');
-                board.generateRoom(worker.x, worker.y, 1);
-                break;
+      let task = '';
+      if (!worker.moving) {
+        task = worker.task;
+        if (!task && board.mapGet(worker.x, worker.y, 'hp') < BOARD_MAX_HP) {
+          task = 'repair';
+        }
+        if (task) {
+          // update
+          worker.task_counter += dt;
+          worker.busy = true;
+          if (task === 'dig' || task === 'new_worker') {
+            let task_time = DIG_TIME;
+            if (worker.task_counter > task_time) {
+              // done!
+              let new_pos = board.findNearestEmpty(worker.x, worker.y);
+              switch (task) {
+                case 'dig':
+                  board.generateRoom(worker.x, worker.y);
+                  break;
+                case 'new_worker':
+                  let new_worker = new Worker(worker.x, worker.y);
+                  board.workers.push(new_worker);
+                  board.mapSet(worker.x, worker.y, 'red');
+                  board.generateRoom(worker.x, worker.y, 1);
+                  board.checkGenerateExit();
+                  break;
+              }
+              worker.task = '';
+              worker.assigned_at = 0;
+              worker.task_counter = 0;
+              worker.busy = false;
+              board.mobileGoTo(worker, new_pos[0], new_pos[1], SPEED_WORKER);
             }
-            worker.task = '';
-            worker.assigned_at = 0;
-            worker.task_counter = 0;
-            board.mobileGoTo(worker, new_pos[0], new_pos[1], WORKER_SPEED);
+          } else if (task === 'repair') {
+            let task_time = REPAIR_TIME;
+            let be = board.mapGet(worker.x, worker.y);
+            while (worker.task_counter > task_time) {
+              worker.task_counter -= task_time;
+              be.hp = Math.min(BOARD_MAX_HP, be.hp + 1);
+            }
+            if (be.hp === BOARD_MAX_HP) {
+              // let new_pos = board.findNearestEmpty(worker.x, worker.y);
+              worker.assigned_at = 0;
+              worker.task_counter = 0;
+              worker.busy = false;
+              // board.mobileGoTo(worker, new_pos[0], new_pos[1], SPEED_WORKER);
+            }
+          } else if (task === 'exit') {
+            board.num_escaped++;
+            // remove worker
+            arrayRemove(board.workers, board.workers.indexOf(worker));
           }
-        } else if (worker.task === 'repair') {
-          let task_time = REPAIR_TIME;
-          let be = board.mapGet(worker.x, worker.y);
-          while (worker.task_counter > task_time) {
-            worker.task_counter -= task_time;
-            be.hp = Math.min(BOARD_MAX_HP, be.hp + 1);
-          }
-          if (be.hp === BOARD_MAX_HP) {
-            let new_pos = board.findNearestEmpty(worker.x, worker.y);
-            worker.task = '';
-            worker.assigned_at = 0;
-            worker.task_counter = 0;
-            board.mobileGoTo(worker, new_pos[0], new_pos[1], WORKER_SPEED);
-          }
+        } else {
+          worker.task_counter = 0;
+          worker.busy = false;
         }
       }
       // draw
-      if (worker.task && !worker.moving) {
+      if (task && task !== 'exit') {
         let sprite, progress;
         let scale = 1;
         let z = Z_TASK_PROGRESS;
-        switch (worker.task) {
+        switch (task) {
           case 'repair':
             sprite = graphics.hp_progress;
-            progress = worker.task_counter / REPAIR_TIME;
+            progress = 0.92 * worker.task_counter / REPAIR_TIME;
             scale = worker_scale;
             z = Z_WORKER + 1;
             break;
           case 'new_worker':
           case 'dig':
             sprite = graphics.dig_progress;
-            progress = worker.task_counter / TASK_TIME;
+            progress = worker.task_counter / DIG_TIME;
             break;
         }
         draw_list.queue(sprite, b2sX(worker.x + (1 - scale)/2), b2sY(worker.y + (1 - progress)*scale + (1-scale)/2), z, color_yellow,
@@ -555,7 +871,7 @@ TurbulenzEngine.onload = function onloadFn()
 
       // draw worker
       let color = color_white;
-      switch (worker.task) {
+      switch (task) {
         case 'dig':
           color = color_yellow;
           break;
@@ -565,6 +881,26 @@ TurbulenzEngine.onload = function onloadFn()
       }
       draw_list.queue(graphics.worker, b2sX(worker.x + (1 - worker_scale)/2), b2sY(worker.y + (1 - worker_scale)/2), Z_WORKER,
         color, [worker_scale, worker_scale]);
+
+      if (worker.hp < WORKER_MAX_HP) {
+        // draw worker injury
+        let damage = 0.1 + 0.8 * (WORKER_MAX_HP - worker.hp) / WORKER_MAX_HP;
+        draw_list.queue(graphics.worker_damage, b2sX(worker.x + (1 - worker_scale)/2), b2sY(worker.y + (1 - damage)*worker_scale + (1-worker_scale)/2), Z_WORKER_DAMAGE, color_red,
+          [1 * worker_scale, damage * worker_scale], mathDevice.v4Build(0, 128 * (1 - damage), 128, 128));
+      }
+    });
+    board.orbs.forEach(function (orb) {
+      let color = color_green;
+      if (orb.evil) {
+        color = color_red;
+      }
+      let speed = orb.evil ? 4/1000 : 1/1000;
+      let range = orb.evil ? 0.33 : 0.22;
+      orb.detail_x = orb.detail_x + randFloat(-1, 1) * dt * speed;
+      orb.detail_x = Math.min(Math.max(orb.detail_x, -range), range);
+      orb.detail_y = orb.detail_y + randFloat(-1, 1) * dt * speed;
+      orb.detail_y = Math.min(Math.max(orb.detail_y, -range), range);
+      draw_list.queue(graphics.orb, b2sX(orb.x + orb.detail_x), b2sY(orb.y + orb.detail_y), Z_ORB, color, [1, 1]);
     });
   }
 
@@ -582,6 +918,8 @@ TurbulenzEngine.onload = function onloadFn()
       if (board.mapIsNeighbor(x, y)) {
         if (state === 'new_worker') {
           highlight = color_white;
+        } else if (state === 'exit') {
+          highlight = [Math.random(), Math.random(), Math.random(), 1];
         } else {
           highlight = color_yellow;
         }
@@ -591,7 +929,7 @@ TurbulenzEngine.onload = function onloadFn()
       draw_list.queue(graphics.highlight, b2sX(x), b2sY(y), Z_HIGHLIGHT, highlight);
       if (input.clickHit(-Infinity, -Infinity, Infinity, Infinity)) {
         board.assignWork(x, y, state === 'red' ? 'dig' : state === 'new_worker' ? 'new_worker' :
-          board.mapGet(x, y, 'hp') === BOARD_MAX_HP ? '' : 'repair');
+          state === 'exit' ? 'exit' : '');
       }
     }
   }
@@ -599,6 +937,11 @@ TurbulenzEngine.onload = function onloadFn()
   let board = new Board();
 
   function play(dt) {
+    if (!board.workers.length) {
+      dt = dt * 10;
+    }
+    board.updateOrbSpawn(dt);
+    board.updateOrbs(dt);
     board.updateMobiles(dt);
     drawBoard(board, dt);
     checkMouse(board, dt);
@@ -657,7 +1000,7 @@ TurbulenzEngine.onload = function onloadFn()
       return;
     }
     const now = Date.now();
-    const dt = Math.min(Math.max(now - last_tick, 1), 250);
+    const dt = Math.min(Math.max(now - last_tick, 1), 100);
     last_tick = now;
     global_timer += dt;
     input.tick();

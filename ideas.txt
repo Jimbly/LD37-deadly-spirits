@@ -77,8 +77,36 @@ Slightly more RTS
   Start in 3x3 room with 2 workers - will be taking 12 damage, generating 9, workers can repair the difference
 
 
-Plan:
+TODO:
   X Draw room
   X Click to open new room
   X Add workers
-  Add HP, orbs, ticking
+  X Add HP, orbs, ticking
+  X Generate green orbs
+  ! Allow canceling any job
+  X Should not be able to assign to workers to the same task!
+  X find nearest is not looking at dest_x
+  X auto-work if on a damaged square (no task for repair!)
+  X generate an exit after all rescued
+  Move dig/rescue/all task status to board instead of worker? Then canceled dig tasks are resumable.
+  Select worker to assign task to specific worker
+  Put workers on the wall when working on digging
+  Rescuable workers periodically say "help me", "i'm scared", etc
+  Game over screens
+  Edge of the world limits
+  Some kind of intro/help text/tutorial
+    Some mini-rooms at once
+      four evil and a worker and green getting hurt
+      four good and a worker and damaged green getting healed
+    Then game starts, tutorial indicates to build three more Greens, and only then knock down a wall
+  Polish art:
+    Evil walls: pulsating
+    Good orbs: little hearts
+    Workers look more like something?
+  Add sound:
+    Background noises - creak from chair, groan, scream
+    Random 2-note violin
+    Soft ticks for taking damage, thuds for healing
+    Progress sound while digging
+    Thud when dug into room
+    Death urgh
