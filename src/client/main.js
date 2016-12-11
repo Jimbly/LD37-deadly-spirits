@@ -13,6 +13,7 @@ TurbulenzEngine.onload = function onloadFn()
   const TASK_TIME = 1000; //8000;
   const REPAIR_TIME = 8000/16;
   const BOARD_MAX_HP = 16;
+  const WORKER_SPEED = 4/1000;
 
   const Z_BOARD  = 0;
   const Z_HP = 1;
@@ -53,6 +54,13 @@ TurbulenzEngine.onload = function onloadFn()
   // });
   let global_timer = 0;
 
+  function toNumber(v) {
+    return Number(v);
+  }
+  function sign(x) {
+    return x < 0 ? -1:
+      x > 0 ? 1 : 0;
+  }
 
   let sounds = {};
   function loadSound(base) {
@@ -184,6 +192,7 @@ TurbulenzEngine.onload = function onloadFn()
     constructor() {
       this.map = [];
       this.workers = [];
+      this.mobiles = [];
       let init_workers = 2;
 
       for (let ii = -1; ii <= 1; ++ii) {
@@ -303,6 +312,92 @@ TurbulenzEngine.onload = function onloadFn()
       }
     }
 
+    mobileGoTo(mobile, x, y, speed) {
+      if (!mobile.moving) {
+        this.mobiles.push(mobile);
+        mobile.moving = true;
+      }
+      mobile.dest_x = x;
+      mobile.dest_y = y;
+      mobile.next_x = null;
+      mobile.next_y = null;
+      mobile.speed = speed;
+    }
+
+    mobileFindNext(mobile)
+    {
+      let x = mobile.x;
+      let y = mobile.y;
+      let destx = mobile.dest_x;
+      let desty = mobile.dest_y;
+      let next = [];
+      let done = [];
+      let start_key = x + '_' + y;
+      done[start_key] = 'start';
+      next.push([x, y]);
+      while (next.length) {
+        let check = next.splice(0, 1)[0];
+        let from_key = check[0] + '_' + check[1];
+        for (let ii = 0; ii < dx.length; ++ii) {
+          let nextx = check[0] + dx[ii];
+          let nexty = check[1] + dy[ii];
+          let key = nextx + '_' + nexty;
+          if (nextx === destx && nexty === desty) {
+            // made it! recurse back and find next step
+            done[key] = from_key;
+            while (done[key] !== start_key) {
+              key = done[key];
+            }
+            let next_step = key.split('_').map(toNumber);
+            mobile.next_x = next_step[0];
+            mobile.next_y = next_step[1];
+            return;
+          }
+          if (this.mapGet(nextx, nexty, 'state') !== 'green') {
+            continue;
+          }
+          if (done[key]) {
+            continue;
+          }
+          done[key] = from_key;
+          next.push([nextx, nexty]);
+        }
+      }
+      throw 'Cannot find path';
+    }
+
+    updateMobiles(dt) {
+      for (let ii = this.mobiles.length - 1; ii >= 0; --ii) {
+        let mobile = this.mobiles[ii];
+        let dist = mobile.speed * dt;
+        while (dist > 0 && mobile.moving) {
+          if (mobile.next_x === null) {
+            if (mobile.x === mobile.dest_x && mobile.y === mobile.dest_y) {
+              // done!
+              this.mobiles[ii] = this.mobiles[this.mobiles.length - 1];
+              this.mobiles.pop();
+              mobile.moving = false;
+              break;
+            }
+            this.mobileFindNext(mobile);
+          }
+          let delta_x = mobile.next_x - mobile.x;
+          let delta_y = mobile.next_y - mobile.y;
+          let max_delta = Math.max(Math.abs(delta_x), Math.abs(delta_y));
+          if (dist > max_delta) {
+            mobile.x = mobile.next_x;
+            mobile.y = mobile.next_y;
+            mobile.next_x = null;
+            dist -= max_delta;
+          } else {
+            mobile.x += sign(delta_x) * dist;
+            mobile.y += sign(delta_y) * dist;
+            dist = 0;
+          }
+        }
+      }
+    }
+
     assignWork(x, y, task) {
       // Do nothing if someone alread ythere
       for (let ii = 0; ii < this.workers.length; ++ii) {
@@ -320,6 +415,9 @@ TurbulenzEngine.onload = function onloadFn()
         if (worker.assigned_at) {
           continue;
         }
+        if (worker.moving) {
+          continue;
+        }
         let dist = Math.abs(worker.x - x) + Math.abs(worker.y - y);
         if (dist < best) {
           worker_idx = ii;
@@ -330,8 +428,7 @@ TurbulenzEngine.onload = function onloadFn()
         return;
       }
       let worker = this.workers[worker_idx];
-      worker.x = x;
-      worker.y = y;
+      this.mobileGoTo(worker, x, y, WORKER_SPEED);
       if (task) {
         worker.assigned_at = global_timer;
       }
@@ -394,7 +491,7 @@ TurbulenzEngine.onload = function onloadFn()
     }
     board.workers.forEach(function (worker) {
       // draw and update task progress
-      if (worker.task) {
+      if (worker.task && !worker.moving) {
         // update
         worker.task_counter += dt;
         if (worker.task === 'dig' || worker.task === 'new_worker') {
@@ -413,11 +510,10 @@ TurbulenzEngine.onload = function onloadFn()
                 board.generateRoom(worker.x, worker.y, 1);
                 break;
             }
-            worker.x = new_pos[0];
-            worker.y = new_pos[1];
             worker.task = '';
             worker.assigned_at = 0;
             worker.task_counter = 0;
+            board.mobileGoTo(worker, new_pos[0], new_pos[1], WORKER_SPEED);
           }
         } else if (worker.task === 'repair') {
           let task_time = REPAIR_TIME;
@@ -427,14 +523,16 @@ TurbulenzEngine.onload = function onloadFn()
             be.hp = Math.min(BOARD_MAX_HP, be.hp + 1);
           }
           if (be.hp === BOARD_MAX_HP) {
+            let new_pos = board.findNearestEmpty(worker.x, worker.y);
             worker.task = '';
             worker.assigned_at = 0;
             worker.task_counter = 0;
+            board.mobileGoTo(worker, new_pos[0], new_pos[1], WORKER_SPEED);
           }
         }
       }
       // draw
-      if (worker.task) {
+      if (worker.task && !worker.moving) {
         let sprite, progress;
         let scale = 1;
         let z = Z_TASK_PROGRESS;
@@ -492,7 +590,8 @@ TurbulenzEngine.onload = function onloadFn()
     if (highlight) {
       draw_list.queue(graphics.highlight, b2sX(x), b2sY(y), Z_HIGHLIGHT, highlight);
       if (input.clickHit(-Infinity, -Infinity, Infinity, Infinity)) {
-        board.assignWork(x, y, state === 'red' ? 'dig' : state === 'new_worker' ? 'new_worker' : 'repair');
+        board.assignWork(x, y, state === 'red' ? 'dig' : state === 'new_worker' ? 'new_worker' :
+          board.mapGet(x, y, 'hp') === BOARD_MAX_HP ? '' : 'repair');
       }
     }
   }
@@ -500,6 +599,7 @@ TurbulenzEngine.onload = function onloadFn()
   let board = new Board();
 
   function play(dt) {
+    board.updateMobiles(dt);
     drawBoard(board, dt);
     checkMouse(board, dt);
   }
