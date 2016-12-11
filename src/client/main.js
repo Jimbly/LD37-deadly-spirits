@@ -10,19 +10,22 @@
 
 TurbulenzEngine.onload = function onloadFn()
 {
-  const TEST = true;
+  const TEST = false;
 
   const DIG_TIME = TEST ? 1000 : 8000;
+  const DIG_TIME_TUTORIAL = 6000;
   const REPAIR_TIME = 8000/16;
   const BOARD_MAX_HP = 12;
   const WORKER_MAX_HP = TEST ? 200 : 20;
   const SPEED_WORKER = TEST ? 4/1000 : 4/1000;
   const SPEED_ORB_EVIL = 1/1000;
+  const SPEED_ORB_TUTORIAL = 4/1000;
   const SPEED_ORB_GOOD = 1/1000;
   const TARGET_WORKERS = TEST ? 0 : 4;
   const TARGET_WORKER_RANGE = TEST ? [3,6] : [8, 12];
   const EVIL_RATE = 3000;
   const GOOD_RATE = 3000;
+  const TUTORIAL_RATE = 1200;
   const EXIT_DIST = TEST ? 2 : 8;
   const ROOM_OPEN_DELAY = 150;
   const RED_FADE_IN_TIME = 1500;
@@ -42,8 +45,8 @@ TurbulenzEngine.onload = function onloadFn()
   const dx = [-1, 1, 0, 0];
   const dy = [0, 0, -1, 1];
   const dx_suffix = ['L', 'R', 'U', 'D'];
-  const hp_pos_x = [2, 3, 3, 3, 3, 2, 1, 0, 0, 0, 0, 1];
-  const hp_pos_y = [0, 0, 1, 2, 3, 3, 3, 3, 2, 1, 0, 0];
+  const hp_pos_x = [2, 3, 3.3, 3.3, 3, 2, 1, 0, -0.3, -0.3, 0, 1];
+  const hp_pos_y = [-0.3, 0, 1, 2, 3, 3.3, 3.3, 3, 2, 1, 0, -0.3];
   let intervalID;
   const graphicsDevice = TurbulenzEngine.createGraphicsDevice({});
   const mathDevice = TurbulenzEngine.createMathDevice({});
@@ -148,8 +151,8 @@ TurbulenzEngine.onload = function onloadFn()
   loadTexture('test.png');
 
   // Viewport for Draw2D.
-  let game_width = 1280;
-  let game_height = 960;
+  let game_width = 1216;
+  let game_height = 1216;
   const color_white = mathDevice.v4Build(1, 1, 1, 1);
   const color_green = mathDevice.v4Build(0, 1, 0, 1);
   const color_red = mathDevice.v4Build(1, 0, 0, 1);
@@ -246,8 +249,9 @@ TurbulenzEngine.onload = function onloadFn()
     }
   }
 
+  let board_instance = 0;
   class Board {
-    constructor() {
+    constructor(is_tutorial) {
       this.open_count = 0;
       this.map = [];
       this.workers = [];
@@ -255,6 +259,115 @@ TurbulenzEngine.onload = function onloadFn()
       this.orbs = [];
       this.num_escaped = 0;
       this.selected_worker = null;
+      if (is_tutorial) {
+        this.generateTutorial();
+      } else {
+        ++board_instance;
+        if (board_instance === 1) {
+          rand = random_seed.create('seed1');
+        }
+        this.generateInit();
+      }
+    }
+
+    generateTutorial() {
+      let tut = this.tutorial = {
+        counter: 0,
+        counter_limit: 8000,
+        s1: {
+          x: -3,
+          y: -5,
+        },
+        s2: {
+          x: -5,
+          y: 0,
+        },
+        s3: {
+          x: 2,
+          y: 0,
+        }
+      };
+      for (let ii = 0; ii < 3; ++ii) {
+        for (let jj = 0; jj < 3; ++jj) {
+          this.mapSet(tut.s1.x + ii, tut.s1.y + jj, 'green', 0);
+        }
+      }
+      this.workers.push(new Worker(tut.s1.x + 1, tut.s1.y + 1));
+      let worker = tut.s1.worker = new Worker(tut.s1.x + 3, tut.s1.y + 1);
+      worker.last_safe_x = tut.s1.x + 3 - 0.5;
+      worker.last_safe_y = tut.s1.y + 1;
+      worker.task = 'dig';
+      this.workers.push(worker);
+
+      for (let ii = 0; ii < 4; ++ii) {
+        for (let jj = 0; jj < 4; ++jj) {
+          this.mapSet(tut.s2.x + ii, tut.s2.y + jj, ii === 0 ? 'red' : 'green', 0);
+          this.mapSet(tut.s3.x + ii, tut.s2.y + jj, 'green', (ii === 0) ? BOARD_MAX_HP : 0);
+        }
+      }
+      worker = tut.s3.worker = new Worker(tut.s3.x + 3, tut.s3.y + 2);
+      worker.task = 'disabled';
+      this.workers.push(worker);
+
+      this.resetTutorial();
+    }
+
+    resetTutorial() {
+      rand = random_seed.create('tutorial1');
+      let tut = this.tutorial;
+      tut.counter = 0;
+
+      let be = this.map[tut.s1.x + 1][tut.s1.y + 1];
+      be.hp = 0;
+      be.orb_countdown = 1000000;
+
+      be = this.map[tut.s1.x + 2][tut.s1.y + 1];
+      be.hp = 0;
+      be.orb_countdown = 1000000;
+
+      for (let ii = tut.s1.x + 3; ii < tut.s1.x + 7; ++ii) {
+        for (let jj = tut.s1.y - 2; jj < tut.s1.y + 4; ++jj) {
+          if (this.map[ii] && this.map[ii][jj]) {
+            delete this.map[ii][jj];
+          }
+        }
+      }
+      let worker = tut.s1.worker;
+      worker.x = tut.s1.x + 3;
+      worker.y = tut.s1.y + 1;
+      worker.last_safe_x = tut.s1.x + 3 - 0.5;
+      worker.last_safe_y = tut.s1.y + 1;
+      worker.task = 'dig';
+      this.mapSet(tut.s1.x + 3, tut.s1.y + 1, 'red', 0);
+      this.map[tut.s1.x + 3][tut.s1.y + 1].orb_countdown = 1000000;
+
+      worker = new Worker(tut.s2.x + 3, tut.s2.y + 2);
+      worker.task = 'disabled';
+      worker.hp = 10;
+      this.workers.push(worker);
+      be = this.map[tut.s2.x + 3][tut.s2.y + 1];
+      be.hp = BOARD_MAX_HP;
+      be.orb_countdown = 1000000;
+
+
+      tut.s3.worker.hp = 2;
+      be = this.map[tut.s3.x + 3][tut.s3.y + 1];
+      be.hp = 1;
+      //be.orb_countdown = 1000000;
+
+      for (let ii = this.orbs.length - 1; ii >= 0; --ii) {
+        this.removeOrb(this.orbs[ii], ii);
+      }
+    }
+
+    updateTutorial(dt) {
+      this.tutorial.counter += dt;
+      if (this.tutorial.counter > this.tutorial.counter_limit) {
+        this.resetTutorial();
+      }
+    }
+
+    generateInit() {
       let init_workers = 2;
 
       let gen_range = TEST ? 2 : 1;
@@ -325,10 +438,16 @@ TurbulenzEngine.onload = function onloadFn()
           this.open_count++;
         }
         this.map[x][y].orb_out = false;
-        if (hp) {
-          this.map[x][y].orb_countdown = (Math.random() * 0.25 + 0.25) * GOOD_RATE;
+        let rate = null;
+        if (this.tutorial) {
+          rate = TUTORIAL_RATE;
+        } else if (hp) {
+          rate = GOOD_RATE;
         } else if (state === 'red') {
-          this.map[x][y].orb_countdown = (Math.random() * 0.25 + 0.25) * EVIL_RATE;
+          rate = EVIL_RATE;
+        }
+        if (rate) {
+          this.map[x][y].orb_countdown = (Math.random() * 0.25 + 0.25) * rate;
         }
       }
       this.map[x][y].state = state;
@@ -338,6 +457,9 @@ TurbulenzEngine.onload = function onloadFn()
     generateRoom(x, y, force_size) {
       const sizes = [3, 10, 20];
       let size = 2 + Math.floor(this.open_count / 20) + rand(sizes[rand(sizes.length)]);
+      if (this.tutorial) {
+        size = 5;
+      }
       if (force_size) {
         size = force_size;
       }
@@ -359,6 +481,9 @@ TurbulenzEngine.onload = function onloadFn()
           neighbors.push([x + dx[ii], y + dy[ii]]);
           if (!board.mapGet(x + dx[ii], y + dy[ii], 'state')) {
             board.mapSet(x + dx[ii], y + dy[ii], 'red');
+            if (board.tutorial) {
+              board.map[x + dx[ii]][y + dy[ii]].orb_countdown = 1000000;
+            }
             board.map[x + dx[ii]][y + dy[ii]].show_at = show_at;
           }
         }
@@ -471,6 +596,9 @@ TurbulenzEngine.onload = function onloadFn()
           next.push([nextx, nexty]);
         }
       }
+      if (this.tutorial) {
+        return;
+      }
       throw 'Cannot find path';
     }
 
@@ -543,6 +671,9 @@ TurbulenzEngine.onload = function onloadFn()
         }
       }
       if (evil) {
+        if (this.tutorial) {
+          return [x,y];
+        }
         if (this.num_escaped) {
           $('#win_stats').text(this.num_escaped + ' of ' + (TARGET_WORKERS + 2) + ' survived!');
           game_state = winInit;
@@ -569,7 +700,7 @@ TurbulenzEngine.onload = function onloadFn()
       be.orb_out = true;
       let next = this.findNearestOrbTarget(x, y, evil);
       if (next) {
-        this.mobileGoTo(orb, next[0], next[1], (evil ? SPEED_ORB_EVIL : SPEED_ORB_GOOD) * randFloat(0.8, 1));
+        this.mobileGoTo(orb, next[0], next[1], (this.tutorial ? SPEED_ORB_TUTORIAL : evil ? SPEED_ORB_EVIL : SPEED_ORB_GOOD) * randFloat(0.8, 1));
       }
     }
 
@@ -585,7 +716,7 @@ TurbulenzEngine.onload = function onloadFn()
           if (be.state === 'red' || be.hp && this.workers.length) {
             be.orb_countdown -= dt;
             if (be.orb_countdown < 0 && (!be.orb_out || be.state === 'red')) {
-              be.orb_countdown = be.hp ? GOOD_RATE : EVIL_RATE;
+              be.orb_countdown = this.tutorial ? TUTORIAL_RATE : be.hp ? GOOD_RATE : EVIL_RATE;
               this.emitOrb(x, y, !be.hp);
             }
           }
@@ -690,6 +821,20 @@ TurbulenzEngine.onload = function onloadFn()
           }
         }
       }
+    }
+
+    allLit() {
+      for (let xx in this.map) {
+        const x = Number(xx);
+        for (let yy in this.map[x]) {
+          const y = Number(yy);
+          let state =  this.mapGet(x, y, 'state');
+          if (state === 'green' && this.mapGet(x, y, 'hp') === 0) {
+            return false;
+          }
+        }
+      }
+      return true;
     }
 
     checkGenerateExit() {
@@ -808,7 +953,7 @@ TurbulenzEngine.onload = function onloadFn()
   const chat_options = [
     'Help me!',
     'I\'m scared',
-    'Rescue me!',
+    'Please rescue me!',
     'Oh, please no...',
     'What was that noise?',
     'Why am I here?',
@@ -822,7 +967,12 @@ TurbulenzEngine.onload = function onloadFn()
     'Get me out of here...',
     'I want to go home...',
   ];
+  let help_count = 0;
   function randomHelpText() {
+    ++help_count;
+    if (help_count < 5) {
+      return 'Rescue me!';
+    }
     return chat_options[Math.floor(Math.random() * chat_options.length)];
   }
   function drawBoard(board, dt) {
@@ -899,6 +1049,10 @@ TurbulenzEngine.onload = function onloadFn()
     }
     let game_width_fit = Math.max(450, board_tile_size * (Math.max(maxx,-minx)*2 + 1));
     let game_height_fit = Math.max(450, board_tile_size * (Math.max(maxy,-miny)*2 + 1));
+    if (board.tutorial) {
+      game_width_fit += board_tile_size*2;
+      game_height_fit += board_tile_size*2;
+    }
     const ZOOM_SPEED = 200/1000;
     let max_zoom = ZOOM_SPEED * dt;
     if (game_width_fit < game_width) {
@@ -930,7 +1084,7 @@ TurbulenzEngine.onload = function onloadFn()
           be.task_counter += dt;
           if (task === 'dig' || task === 'new_worker') {
             worker.busy = true;
-            let task_time = DIG_TIME;
+            let task_time = board.tutorial ? DIG_TIME_TUTORIAL : DIG_TIME;
             if (be.task_counter > task_time) {
               // done!
               let new_pos = board.findNearestEmpty(worker.x, worker.y);
@@ -950,13 +1104,33 @@ TurbulenzEngine.onload = function onloadFn()
               worker.assigned_at = 0;
               worker.busy = false;
               board.mobileGoTo(worker, new_pos[0], new_pos[1], SPEED_WORKER);
+              if (board.tutorial_state === 3) {
+                delete board.tutorial_state;
+                $('#play_tutorial3').fadeOut();
+                $('#play_tutorial4').fadeIn();
+                setTimeout(function () {
+                  $('#play_tutorial4').fadeOut();
+                }, 5000);
+              }
             }
           } else if (task === 'repair') {
             let task_time = REPAIR_TIME;
             let be = board.mapGet(worker.x, worker.y);
             while (be.task_counter > task_time) {
               be.task_counter -= task_time;
+              if (be.hp === 4 && board.tutorial_state === 1) {
+                $('#play_tutorial1').fadeOut();
+                ++board.tutorial_state;
+                $('#play_tutorial2').fadeIn();
+              }
               be.hp = Math.min(BOARD_MAX_HP, be.hp + 1);
+              if (board.tutorial_state === 2) {
+                if (board.allLit()) {
+                  $('#play_tutorial2').fadeOut();
+                  ++board.tutorial_state;
+                  $('#play_tutorial3').fadeIn();
+                }
+              }
             }
             if (be.hp < BOARD_MAX_HP - 2) {
               worker.busy = true;
@@ -976,7 +1150,7 @@ TurbulenzEngine.onload = function onloadFn()
           worker.busy = false;
         }
         // draw task progress
-        if (task && task !== 'exit') {
+        if (task && task !== 'exit' && task !== 'disabled') {
           let sprite, progress;
           let scale = 1;
           let z = Z_TASK_PROGRESS;
@@ -990,7 +1164,7 @@ TurbulenzEngine.onload = function onloadFn()
             case 'new_worker':
             case 'dig':
               sprite = graphics.dig_progress;
-              progress = be.task_counter / DIG_TIME;
+              progress = be.task_counter / (board.tutorial ? DIG_TIME_TUTORIAL : DIG_TIME);
               break;
           }
           draw_list.queue(sprite, b2sX(worker.x + (1 - scale)/2), b2sY(worker.y + (1 - progress)*scale + (1-scale)/2), z, color_yellow,
@@ -1078,7 +1252,7 @@ TurbulenzEngine.onload = function onloadFn()
     let neighbor;
     if (!highlight && state === 'green') {
       highlight = color_green;
-    } else if (!highlight) {
+    } else if (!highlight && board.tutorial_state !== 1 && board.tutorial_state !== 2) {
       // is neighbor green?
       neighbor = board.mapIsNeighbor(x, y);
       if (neighbor) {
@@ -1132,13 +1306,35 @@ TurbulenzEngine.onload = function onloadFn()
     checkMouse(board, dt);
   }
 
+  function tutorial(dt) {
+    board.updateOrbSpawn(dt);
+    board.updateOrbs(dt);
+    board.updateMobiles(dt);
+    drawBoard(board, dt);
+    board.updateTutorial(dt);
+  }
+
   function playInit(dt) {
     board = new Board();
     initGraphics();
     $('.screen').hide();
     $('#play').show();
+    $('#play_tutorial').show();
+    $('.play_tutorial').hide();
+    $('#play_tutorial1').show();
+    board.tutorial_state = 1;
     game_state = play;
     play(dt);
+  }
+
+  function tutorialInit(dt) {
+    board = new Board(true);
+    initGraphics();
+    $('.screen').hide();
+    $('#play').show();
+    $('#tutorial').show();
+    game_state = tutorial;
+    tutorial(dt);
   }
 
 /*  function test(dt) {
@@ -1203,6 +1399,7 @@ TurbulenzEngine.onload = function onloadFn()
     win(dt);
   }
 
+  //game_state = tutorialInit;
   game_state = playInit;
 
   let last_tick = Date.now();

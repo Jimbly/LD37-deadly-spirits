@@ -98,11 +98,11 @@ TODO:
   X Edge of the world limits
   X Rescuable workers periodically say "help me", "i'm scared", etc
   X Game over screens
-  Some kind of intro/help text/tutorial
-    Some mini-rooms at once
-      four evil and a worker and green getting hurt
-      four good and a worker and damaged green getting healed
-    Then game starts, tutorial indicates to build three more Greens, and only then knock down a wall
+  X Some kind of intro/help text/tutorial
+  X   Some mini-rooms at once
+  X     four evil and a worker and green getting hurt
+  X     four good and a worker and damaged green getting healed
+  X   Then game starts, tutorial indicates to build three more Greens, and only then knock down a wall
   Polish art:
     Evil walls: pulsating
     Good orbs: little hearts
