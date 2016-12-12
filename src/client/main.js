@@ -10,7 +10,7 @@
 
 TurbulenzEngine.onload = function onloadFn()
 {
-  const TEST = false;
+  const TEST = true;
 
   const DIG_TIME = TEST ? 1000 : 8000;
   const DIG_TIME_TUTORIAL = 6000;
@@ -21,8 +21,8 @@ TurbulenzEngine.onload = function onloadFn()
   const SPEED_ORB_EVIL = 1/1000;
   const SPEED_ORB_TUTORIAL = 4/1000;
   const SPEED_ORB_GOOD = 1/1000;
-  const TARGET_WORKERS = TEST ? 0 : 4;
-  const TARGET_WORKER_RANGE = TEST ? [3,6] : [8, 12];
+  const TARGET_WORKERS = TEST ? 4 : 4;
+  const TARGET_WORKER_RANGE = [8,12]; //TEST ? [3,6] : [8, 12];
   const EVIL_RATE = 3000;
   const GOOD_RATE = 3000;
   const TUTORIAL_RATE = 1200;
@@ -79,7 +79,7 @@ TurbulenzEngine.onload = function onloadFn()
   //   relative : false,
   //   pitch : 1.0,
   // });
-  let global_timer = 0;
+  let global_timer = 100007; // start somewhere non-zero to reduce graphical artifacts
 
   function toNumber(v) {
     return Number(v);
@@ -154,7 +154,9 @@ TurbulenzEngine.onload = function onloadFn()
   let game_width = 1216;
   let game_height = 1216;
   const color_white = mathDevice.v4Build(1, 1, 1, 1);
-  const color_green = mathDevice.v4Build(0, 1, 0, 1);
+  const color_light = mathDevice.v4Build(1, 1, 0, 1);
+  const color_light_orb = mathDevice.v4Build(0.5, 1, 0, 1);
+  const color_dig = mathDevice.v4Build(0.3, 0.5, 1, 1);
   const color_red = mathDevice.v4Build(1, 0, 0, 1);
   const color_hp_inactive = mathDevice.v4Build(0.5, 0, 0, 0.5);
   const color_yellow = mathDevice.v4Build(1, 1, 0, 1);
@@ -220,9 +222,10 @@ TurbulenzEngine.onload = function onloadFn()
     loadSprite('worker_damage', 128);
     loadSprite('dig_progress', 128);
     loadSprite('hp_progress', 128);
-    loadSprite('red', 128);
+    loadSprite('red', 128, 64, [32, 32]);
     loadSprite('exit', 128);
     loadSprite('orb', 128, orb_tile_size, [-24, -24]);
+    loadSprite('orb_good', 128, orb_tile_size, [-24, -24]);
     loadSprite('hp', 32, hp_tile_size);
     loadSprite('hp_center', 128, 40, [20, 20]);
   }
@@ -236,6 +239,12 @@ TurbulenzEngine.onload = function onloadFn()
       this.task_counter = 0;
       this.show_at = 0;
       this.notify_countdown = 0;
+      // scale
+      this.period = 2500 + Math.random() * 6000;
+      // rotation
+      this.period2 = (5500 + Math.random() * 9000) * ((Math.random() < 0.5) ? -1 : 1);
+      // alpha
+      this.period3 = 10000 + Math.random() * 5000;
     }
   }
 
@@ -1005,7 +1014,7 @@ TurbulenzEngine.onload = function onloadFn()
                 let color = color_hp_inactive;
                 let z = Z_HP_INACTIVE;
                 if (be.hp > ii) {
-                  color = color_green;
+                  color = color_light;
                   z = Z_HP;
                 }
                 draw_list.queue(graphics.hp,
@@ -1022,11 +1031,18 @@ TurbulenzEngine.onload = function onloadFn()
           case 'red':
             let lifetime = global_timer - be.show_at;
             if (lifetime >= 0) {
-              let color = color_white;
+              let color = [1,1,1,1];
               if (lifetime < RED_FADE_IN_TIME) {
-                color = [1, 1, 1, lifetime / RED_FADE_IN_TIME];
+                color[3] = lifetime / RED_FADE_IN_TIME;
               }
-              draw_list.queue(graphics.red, draw_x, draw_y, Z_BOARD, color);
+              color[3] = Math.min(
+                color[3],
+                0.7 + 0.3 * Math.sin(global_timer / be.period3 * Math.PI * 2)
+              );
+              let scale = 1 + 0.5 * Math.max(Math.abs(Math.sin(global_timer / be.period * Math.PI * 2) + 0.3),
+                Math.abs(Math.sin(global_timer / be.period * Math.PI * 2 + Math.PI/4) + 0.3));
+              let rotation = Math.PI * global_timer / be.period2;
+              draw_list.queue(graphics.red, draw_x + board_tile_size / 2, draw_y + board_tile_size / 2, Z_BOARD, color, [scale, scale], null, rotation, 'additive');
             }
             break;
           case 'new_worker':
@@ -1178,10 +1194,10 @@ TurbulenzEngine.onload = function onloadFn()
       let color = color_white;
       switch (task) {
         case 'dig':
-          color = color_yellow;
+          color = color_dig;
           break;
         case 'repair':
-          color = [0.8, 1, 0.8, 1];
+          color = [0.6, 0.7, 0.4, 1];
           break;
       }
       let draw_x = worker.x;
@@ -1215,7 +1231,7 @@ TurbulenzEngine.onload = function onloadFn()
       }
     });
     board.orbs.forEach(function (orb) {
-      let color = color_green;
+      let color = color_light_orb;
       if (orb.evil) {
         color = color_red;
       }
@@ -1225,7 +1241,7 @@ TurbulenzEngine.onload = function onloadFn()
       orb.detail_x = Math.min(Math.max(orb.detail_x, -range), range);
       orb.detail_y = orb.detail_y + randFloat(-1, 1) * dt * speed;
       orb.detail_y = Math.min(Math.max(orb.detail_y, -range), range);
-      draw_list.queue(graphics.orb, b2sX(orb.x + orb.detail_x), b2sY(orb.y + orb.detail_y), Z_ORB, color, [1, 1]);
+      draw_list.queue(orb.evil ? graphics.orb : graphics.orb_good, b2sX(orb.x + orb.detail_x), b2sY(orb.y + orb.detail_y), Z_ORB, color, [1, 1]);
     });
   }
 
@@ -1251,7 +1267,7 @@ TurbulenzEngine.onload = function onloadFn()
     }
     let neighbor;
     if (!highlight && state === 'green') {
-      highlight = color_green;
+      highlight = color_light_orb;
     } else if (!highlight && board.tutorial_state !== 1 && board.tutorial_state !== 2) {
       // is neighbor green?
       neighbor = board.mapIsNeighbor(x, y);
@@ -1261,7 +1277,7 @@ TurbulenzEngine.onload = function onloadFn()
         } else if (state === 'exit') {
           highlight = [Math.random(), Math.random(), Math.random(), 1];
         } else {
-          highlight = color_yellow;
+          highlight = color_dig;
         }
       }
     }
@@ -1321,8 +1337,10 @@ TurbulenzEngine.onload = function onloadFn()
     $('#play').show();
     $('#play_tutorial').show();
     $('.play_tutorial').hide();
-    $('#play_tutorial1').show();
-    board.tutorial_state = 1;
+    if (!TEST) {
+      $('#play_tutorial1').show();
+      board.tutorial_state = 1;
+    }
     game_state = play;
     play(dt);
   }
@@ -1464,12 +1482,8 @@ TurbulenzEngine.onload = function onloadFn()
     draw2D.setBackBuffer();
     draw2D.clear([0, 0, 0, 1]);
 
-    draw2D.begin('alpha', 'deferred');
-
     game_state(dt);
     draw_list.draw();
-
-    draw2D.end();
     graphicsDevice.endFrame();
   }
 

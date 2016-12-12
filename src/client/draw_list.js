@@ -16,7 +16,7 @@ class GlovDrawList {
     this.list = [];
   }
 
-  queue(sprite, x, y, z, color, scale, tex_rect) {
+  queue(sprite, x, y, z, color, scale, tex_rect, rotation, bucket) {
     sprite.test = 1;
     let elem = {
       sprite,
@@ -24,26 +24,37 @@ class GlovDrawList {
       color,
       scale: scale || unit_vec4,
       tex_rect,
+      bucket: bucket || 'alpha',
+      rotation: rotation || 0,
     };
     this.list.push(elem);
   }
 
 
   draw() {
+    let bucket = 'alpha';
+    this.draw2d.begin('alpha', 'deferred');
     this.list.sort(cmpDrawList);
     for (let ii = 0; ii < this.list.length; ++ii) {
       let elem = this.list[ii];
+      if (elem.bucket !== bucket) {
+        this.draw2d.end();
+        bucket = elem.bucket;
+        this.draw2d.begin(bucket, 'deferred');
+      }
       let sprite = elem.sprite;
       sprite.x = elem.x;
       sprite.y = elem.y;
       sprite.setScale(elem.scale);
       sprite.setColor(elem.color);
+      sprite.rotation = elem.rotation;
       if (elem.tex_rect) {
         sprite.setTextureRectangle(elem.tex_rect);
       }
       this.draw2d.drawSprite(sprite);
     }
     this.list.length = 0;
+    this.draw2d.end();
   }
 }
 
