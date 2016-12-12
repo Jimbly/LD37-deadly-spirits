@@ -10,7 +10,7 @@
 
 TurbulenzEngine.onload = function onloadFn()
 {
-  const TEST = true;
+  const TEST = false;
 
   const DIG_TIME = TEST ? 1000 : 8000;
   const DIG_TIME_TUTORIAL = 6000;
@@ -219,7 +219,6 @@ TurbulenzEngine.onload = function onloadFn()
     loadSprite('highlight_U', 256);
     loadSprite('highlight_D', 256);
     loadSprite('worker', 128);
-    loadSprite('worker_damage', 128);
     loadSprite('dig_progress', 128);
     loadSprite('hp_progress', 128);
     loadSprite('red', 128, 64, [32, 32]);
@@ -228,6 +227,12 @@ TurbulenzEngine.onload = function onloadFn()
     loadSprite('orb_good', 128, orb_tile_size, [-24, -24]);
     loadSprite('hp', 32, hp_tile_size);
     loadSprite('hp_center', 128, 40, [20, 20]);
+    loadSprite('worker_head', 64, 32, [16, 16]);
+    loadSprite('worker_head_dig', 64, 32, [16, 16]);
+    loadSprite('worker_head_shock', 64, 32, [16, 16]);
+    loadSprite('worker_hand', 32, 16, [8, 8]);
+    loadSprite('worker_torso', 128, 64, [32, 64]);
+    loadSprite('worker_damage', 128, 64, [32, 64]);
   }
 
   class BoardEntry {
@@ -255,6 +260,9 @@ TurbulenzEngine.onload = function onloadFn()
       this.assigned_at = 0;
       this.task = '';
       this.hp = WORKER_MAX_HP;
+      this.period_head = 2000 + Math.random() * 2000;
+      this.period_hands = 4000 + Math.random() * 2000;
+      this.hand_pos = null;
     }
   }
 
@@ -1071,6 +1079,9 @@ TurbulenzEngine.onload = function onloadFn()
     }
     const ZOOM_SPEED = 200/1000;
     let max_zoom = ZOOM_SPEED * dt;
+    if (board.tutorial) {
+      max_zoom = 0;
+    }
     if (game_width_fit < game_width) {
       game_width = game_width_fit;
     } else {
@@ -1170,12 +1181,16 @@ TurbulenzEngine.onload = function onloadFn()
           let sprite, progress;
           let scale = 1;
           let z = Z_TASK_PROGRESS;
+          let color = color_dig;
+          let pass = 'alpha';
           switch (task) {
             case 'repair':
               sprite = graphics.hp_progress;
-              progress = 0.92 * be.task_counter / REPAIR_TIME;
-              scale = worker_scale;
-              z = Z_WORKER + 1;
+              progress = be.task_counter / REPAIR_TIME;
+              scale = 1; //worker_scale;
+              z = Z_WORKER - 0.1;
+              color = [1,1,1,0.7];
+              pass = 'additive';
               break;
             case 'new_worker':
             case 'dig':
@@ -1183,21 +1198,21 @@ TurbulenzEngine.onload = function onloadFn()
               progress = be.task_counter / (board.tutorial ? DIG_TIME_TUTORIAL : DIG_TIME);
               break;
           }
-          draw_list.queue(sprite, b2sX(worker.x + (1 - scale)/2), b2sY(worker.y + (1 - progress)*scale + (1-scale)/2), z, color_yellow,
-            [1 * scale, progress * scale], mathDevice.v4Build(0, 128 * (1 - progress), 128, 128));
+          draw_list.queue(sprite, b2sX(worker.x + (1 - scale)/2), b2sY(worker.y + (1 - progress)*scale + (1-scale)/2), z, color,
+            [1 * scale, progress * scale], mathDevice.v4Build(0, 128 * (1 - progress), 128, 128), 0, pass);
         }
       } else {
         worker.busy = false;
       }
 
       // draw worker
-      let color = color_white;
+      let color = [0.7, 0.7, 0.7, 1];
       switch (task) {
         case 'dig':
           color = color_dig;
           break;
         case 'repair':
-          color = [0.6, 0.7, 0.4, 1];
+          color = [0.8, 0.8, 0.4, 1];
           break;
       }
       let draw_x = worker.x;
@@ -1213,15 +1228,61 @@ TurbulenzEngine.onload = function onloadFn()
       }
       worker.draw_x = draw_x;
       worker.draw_y = draw_y;
-      draw_list.queue(graphics.worker, b2sX(draw_x + (1 - worker_scale)/2), b2sY(draw_y + (1 - worker_scale)/2), Z_WORKER,
-        color, [worker_scale, worker_scale]);
 
+      // Draw worker parts
       let hp = worker.hp;
+      let scale = worker_scale;
+      let arm_xoffs = 22;
+      let arm_yoffs = -40;
+      let arm_waggle = 6;
+      let arm_waggle_speed = 1;
+      let arm_x_waggle = 0;
+      let head = 'worker_head';
+      if (hp < 8 || worker.moving) {
+        arm_xoffs = 26;
+        arm_yoffs = -64;
+        arm_waggle = 10;
+        arm_waggle_speed = 8;
+        arm_x_waggle = 2.5;
+        head = 'worker_head_shock';
+      } else if (task === 'dig') {
+        arm_waggle_speed = 4;
+        arm_yoffs = -50;
+        head = 'worker_head_dig';
+      }
+      let pos = [b2sX(draw_x + 0.5), b2sY(draw_y + 1)];
+      draw_list.queue(graphics.worker_torso, pos[0], pos[1], Z_WORKER,
+        color, [scale, scale]);
+      draw_list.queue(graphics[head], pos[0], pos[1] + scale * (-70 +
+        6 * Math.sin(global_timer / worker.period_head * Math.PI * 2) * Math.sin(global_timer / worker.period_head * Math.PI * 2)),
+        Z_WORKER + 0.2, (hp < 3) ? color_red : color, [scale, scale]);
+      let hand_waggle = Math.sin(global_timer / worker.period_hands * Math.PI * 2 * arm_waggle_speed);
+      let hand_pos = [(arm_xoffs - hand_waggle * arm_x_waggle), (arm_yoffs + arm_waggle * hand_waggle)];
+      if (worker.hand_pos === null) {
+        worker.hand_pos = hand_pos;
+      } else {
+        // blend
+        const HAND_SPEED = 64/1000;
+        let max_hand_dist = HAND_SPEED * dt;
+        for (let ii = 0; ii < 2; ++ii) {
+          if (hand_pos[ii] > worker.hand_pos[ii]) {
+            worker.hand_pos[ii] = Math.min(worker.hand_pos[ii] + max_hand_dist, hand_pos[ii]);
+          } else {
+            worker.hand_pos[ii] = Math.max(worker.hand_pos[ii] - max_hand_dist, hand_pos[ii]);
+          }
+        }
+        hand_pos = worker.hand_pos;
+      }
+      draw_list.queue(graphics.worker_hand, pos[0] + hand_pos[0] * scale, pos[1] + scale * hand_pos[1],
+        Z_WORKER + 0.3, (hp < 10) ? color_red : color, [scale, scale]);
+      draw_list.queue(graphics.worker_hand, pos[0] - hand_pos[0] * scale, pos[1] + scale * hand_pos[1],
+        Z_WORKER + 0.3, (hp < 8) ? color_red : color, [scale, scale]);
+
       if (hp < WORKER_MAX_HP) {
         // draw worker injury
-        let damage = 0.1 + 0.8 * (WORKER_MAX_HP - hp) / WORKER_MAX_HP;
-        draw_list.queue(graphics.worker_damage, b2sX(draw_x + (1 - worker_scale)/2), b2sY(draw_y + (1 - damage)*worker_scale + (1-worker_scale)/2), Z_WORKER_DAMAGE, color_red,
-          [1 * worker_scale, damage * worker_scale], mathDevice.v4Build(0, 128 * (1 - damage), 128, 128));
+        let damage = 0.15 + 0.7 * (WORKER_MAX_HP - hp) / WORKER_MAX_HP;
+        draw_list.queue(graphics.worker_damage, pos[0], pos[1], Z_WORKER + 0.1,
+          color_white, [scale, damage * scale], mathDevice.v4Build(0, 128 * (1 - damage), 128, 128));
       }
 
       if (worker === board.selected_worker) {
@@ -1330,6 +1391,7 @@ TurbulenzEngine.onload = function onloadFn()
     board.updateTutorial(dt);
   }
 
+  let first_time = true;
   function playInit(dt) {
     board = new Board();
     initGraphics();
@@ -1339,7 +1401,10 @@ TurbulenzEngine.onload = function onloadFn()
     $('.play_tutorial').hide();
     if (!TEST) {
       $('#play_tutorial1').show();
-      board.tutorial_state = 1;
+      if (first_time) {
+        board.tutorial_state = 1;
+        first_time = false;
+      }
     }
     game_state = play;
     play(dt);
@@ -1417,8 +1482,8 @@ TurbulenzEngine.onload = function onloadFn()
     win(dt);
   }
 
-  //game_state = tutorialInit;
-  game_state = playInit;
+  game_state = tutorialInit;
+  //game_state = playInit;
 
   let last_tick = Date.now();
   let last_game_width = game_width;

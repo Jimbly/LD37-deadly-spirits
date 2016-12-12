@@ -103,14 +103,8 @@ TODO:
   X     four evil and a worker and green getting hurt
   X     four good and a worker and damaged green getting healed
   X   Then game starts, tutorial indicates to build three more Greens, and only then knock down a wall
-  Polish art:
+  X Polish art:
     X Evil walls: pulsating
     X Good orbs: little hearts
-    Workers look more like something?
-  Add sound:
-    Background noises - creak from chair, groan, scream
-    Random 2-note violin
-    Soft ticks for taking damage, thuds for healing
-    Progress sound while digging
-    Thud when dug into room
-    Death urgh
+    X Workers look more like something?
+  Add sound
