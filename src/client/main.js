@@ -62,24 +62,14 @@ TurbulenzEngine.onload = function onloadFn()
     return Math.random() * (max - min) + min;
   }
 
-  let soundDeviceParameters = {
-    linearDistance : false
-  };
-  const soundDevice = TurbulenzEngine.createSoundDevice(soundDeviceParameters);
   const camera = Camera.create(mathDevice);
   const lookAtPosition = mathDevice.v3Build(0.0, 0.0, 0.0);
   const worldUp = mathDevice.v3BuildYAxis();
   const cameraPosition = mathDevice.v3Build(0.0, 0.0, 1.0);
   camera.lookAt(lookAtPosition, worldUp, cameraPosition);
   camera.updateViewMatrix();
-  soundDevice.listenerTransform = camera.matrix;
+  const sound_manager = require('./sound_manager.js').create(camera.matrix);
 
-  const sound_loop = soundDevice.createSource({
-    position : mathDevice.v3Build(0, 0, 0),
-    relative : false,
-    pitch : 1.0,
-    looping: true,
-  });
   let global_timer = 100007; // start somewhere non-zero to reduce graphical artifacts
 
   function toNumber(v) {
@@ -94,80 +84,20 @@ TurbulenzEngine.onload = function onloadFn()
     arr.pop();
   }
 
-  let sounds = {};
-  function loadSound(base, cb) {
-    let src = 'sounds/' + base;
-    // if (soundDevice.isSupported('FILEFORMAT_WAV')) {
-    src += '.wav';
-    // } else {
-    //   src += '.ogg';
-    // }
-    soundDevice.createSound({
-      src: src,
-      onload: function (sound) {
-        if (sound) {
-          sounds[base] = sound;
-          if (cb) {
-            cb();
-          }
-        }
-      }
-    });
-  }
-  function playSoundRaw(source, soundname) {
-    if (!sounds[soundname]) {
+  function playSound(soundname) {
+    if (board.tutorial) {
       return;
     }
-    source.play(sounds[soundname]);
+    sound_manager.play(soundname);
   }
 
-  class SoundManager {
-    constructor() {
-      this.channels = [];
-      for (let ii = 0; ii < 16; ++ii) {
-        this.channels[ii] = soundDevice.createSource({
-          position : mathDevice.v3Build(0, 0, 0),
-          relative : false,
-          pitch : 1.0,
-        });
-      }
-      this.channel = 0;
-      this.last_played = {};
-    }
-
-    play(soundname) {
-      if (board.tutorial) {
-        return;
-      }
-      if (!sounds[soundname]) {
-        return;
-      }
-      let last_played_time = this.last_played[soundname] || -9e9;
-      if (global_timer - last_played_time < 45) {
-        return;
-      }
-      this.channels[this.channel++].play(sounds[soundname]);
-      this.last_played[soundname] = global_timer;
-      if (this.channel === this.channels.length) {
-        this.channel = 0;
-      }
-    }
-  }
-
-  let sound_manager = new SoundManager();
-
-  function loadAndPlaySound(source, soundname) {
-    loadSound(soundname, function () {
-      playSoundRaw(source, soundname);
-    });
-  }
-  loadAndPlaySound(sound_loop, 'ambient1');
+  sound_manager.playLooping('ambient1');
 
   function playAmbient(file, min_time, range) {
-    loadSound(file);
+    sound_manager.loadSound(file);
     function doit() {
       setTimeout(doit, min_time + Math.random() * range);
-      sound_manager.play(file);
+      playSound(file);
     }
     setTimeout(doit, min_time + Math.random() * range);
   }
@@ -175,33 +105,28 @@ TurbulenzEngine.onload = function onloadFn()
 
   function playRandomLoop(file_list, min_time, range) {
     for (let ii = 0; ii < file_list.length; ++ii) {
-      loadSound(file_list[ii]);
+      sound_manager.loadSound(file_list[ii]);
     }
     function doit() {
       setTimeout(doit, min_time + Math.random() * range);
-      sound_manager.play(file_list[Math.floor(Math.random() * file_list.length)]);
+      playSound(file_list[Math.floor(Math.random() * file_list.length)]);
     }
     setTimeout(doit, min_time + Math.random() * range);
   }
   playRandomLoop(['effect1', 'effect2', 'effect3'], 1500, 20000);
 
-  loadSound('green_damage');
+  sound_manager.loadSound('green_damage');
 
   function playRandom(file_list) {
-    sound_manager.play(file_list[Math.floor(Math.random() * file_list.length)]);
-  }
-  function loadList(sounds) {
-    for (let ii = 0; ii < sounds.length; ++ii) {
-      loadSound(sounds[ii]);
-    }
+    playSound(file_list[Math.floor(Math.random() * file_list.length)]);
   }
   let hurt_sounds = ['hurt1', 'hurt2', 'hurt3'];
-  loadList(hurt_sounds);
+  sound_manager.loadSound(hurt_sounds);
   let heal_sounds = ['heal1', 'heal2', 'heal3'];
-  loadList(heal_sounds);
+  sound_manager.loadSound(heal_sounds);
 
-  loadSound('dig');
-  loadSound('die');
+  sound_manager.loadSound('dig');
+  sound_manager.loadSound('die');
 
   let textures = {};
   function loadTexture(texname) {
@@ -856,7 +781,7 @@ TurbulenzEngine.onload = function onloadFn()
             }
             if (!worker.hp) {
               // DIE
-              sound_manager.play('die');
+              playSound('die');
               this.removeWorker(worker);
             }
             this.removeOrb(orb, ii);
@@ -872,7 +797,7 @@ TurbulenzEngine.onload = function onloadFn()
             let be = this.mapGet(int_x, int_y);
             if (orb.evil) {
               be.hp--;
-              sound_manager.play('green_damage');
+              playSound('green_damage');
             } else {
               be.hp++;
             }
@@ -1194,7 +1119,7 @@ TurbulenzEngine.onload = function onloadFn()
           be.task_counter += dt;
           if (task === 'dig' || task === 'new_worker') {
             if (Math.floor((old_counter - 1) / 2000) !== Math.floor((be.task_counter - 1) / 2000)) {
-              sound_manager.play('dig');
+              playSound('dig');
             }
             worker.busy = true;
             let task_time = board.tutorial ? DIG_TIME_TUTORIAL : DIG_TIME;
@@ -1257,7 +1182,7 @@ TurbulenzEngine.onload = function onloadFn()
           } else if (task === 'exit') {
             board.num_escaped++;
             // remove worker
-            sound_manager.play('exit');
+            playSound('exit');
             board.removeWorker(worker);
           }
         } else {
@@ -1586,6 +1511,7 @@ TurbulenzEngine.onload = function onloadFn()
     const dt = Math.min(Math.max(now - last_tick, 1), 100);
     last_tick = now;
     global_timer += dt;
+    sound_manager.tick();
     input.tick();
 
     {
