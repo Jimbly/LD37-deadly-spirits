@@ -6,8 +6,15 @@ class SoundManager {
     let soundDeviceParameters = {
       linearDistance : false
     };
-    this.soundDevice = TurbulenzEngine.createSoundDevice(soundDeviceParameters);
+    let soundDevice = this.soundDevice = TurbulenzEngine.createSoundDevice(soundDeviceParameters);
     this.soundDevice.listenerTransform = listenerTransform;
+
+    window.document.body.addEventListener('click', function () {
+      soundDevice.resume();
+    });
+    window.document.body.addEventListener('keydown', function () {
+      soundDevice.resume();
+    });
 
     this.channels = [];
     for (let ii = 0; ii < 16; ++ii) {
@@ -79,7 +86,7 @@ class SoundManager {
       if (!sounds[soundname]) {
         return;
       }
-      this.sound_loop.play(sounds[soundname]);
+      this.sound_loop.play(sounds[soundname], 0, true);
     });
   }
 }
